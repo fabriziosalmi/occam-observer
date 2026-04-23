@@ -1,6 +1,6 @@
 # Occam Observer
 
-**v0.2.0** · [Changelog](#changelog)
+**v0.2.1** · [Changelog](#changelog)
 
 > *Out-of-band, agent-friendly Git telemetry.*
 
@@ -443,6 +443,37 @@ cd docs && npm ci && npm run docs:dev
 | 3    | Bad CLI arguments / invalid config                             |
 
 ## Changelog
+
+### v0.2.1 — 2026-04-23
+
+Patch release from a full-axis correctness audit (severity math, security
+surfaces, SQL safety, Go concurrency, Prometheus compliance, MCP error
+codes, contract consistency, start-lock race, documentation numbers).
+
+Fixes
+- `compute_severity` no longer emits duplicate reasons when a metric
+  crosses multiple bands. The mass and entropy ladders (warn → critical)
+  and the debt ladder (`>0` → `>=5`) are now mutually exclusive via
+  `if/elif`, so each metric contributes exactly one entry to `reasons[]`.
+  The overall `check.level` is unchanged — this was a reason-list cleanup
+  only.
+- `./occam start` was TOCTOU-racing between `read_pid` and the pidfile
+  write: two parallel invocations both spawned a gateway, the second
+  failed to bind, and its dead PID overwrote the pidfile, orphaning the
+  first. Replaced with a `mkdir`-based start lock (POSIX-atomic,
+  portable BSD/GNU). Second start now exits 1 with a recovery hint.
+- The TUI-mode initial cache seed hardcoded `is_idle=false` with all
+  zero metrics, briefly flashing "LIVE" in the dashboard before the
+  first real analysis corrected it. Changed to `true` for consistency
+  with the semantic fix shipped on the v0.2.0 tag.
+
+Docs
+- README assertion counts aligned with reality: 8 regression suites
+  contributing 107 assertions, plus 4 meta-checks (`go vet` × 2,
+  `bash -n`, `--validate`). The previous "12 suites" figure conflated
+  suites with meta-checks.
+
+No contract changes. All 12 meta-items still green (107 test assertions).
 
 ### v0.2.0 — 2026-04-23
 

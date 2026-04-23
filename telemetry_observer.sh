@@ -12,7 +12,7 @@
 # =============================================================================
 set -euo pipefail
 
-readonly OCCAM_VERSION="0.2.0"
+readonly OCCAM_VERSION="0.2.1"
 
 # ── ANSI / COLOR PALETTE ─────────────────────────────────────────────────────
 readonly RST="\033[0m"   BLD="\033[1m"   DIM="\033[2m"   REV="\033[7m"
