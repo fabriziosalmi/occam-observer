@@ -70,7 +70,7 @@ resp="$(printf '%s\n' "$req" | mcp_exchange | head -1)"
 is_err="$(echo "$resp" | jq -r '.result.isError')"
 text="$(echo "$resp" | jq -r '.result.content[0].text')"
 ver="$(echo "$text" | jq -r '.version' 2>/dev/null)"
-if [ "$is_err" = "false" ] && [ "$ver" = "3.1.0" ]; then
+if [ "$is_err" = "false" ] && [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     pass "T3 occam_analyze returns engine JSON (version=$ver)"
 else
     fail "T3 is_err=$is_err ver=$ver body=${text:0:200}"

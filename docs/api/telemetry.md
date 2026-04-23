@@ -72,7 +72,7 @@ Content-Type: application/json
 
 ```json
 {
-  "version": "3.1.0",
+  "version": "0.2.0",
   "trace_id": "b3c4d5e6f7a8b9c0",
   "timestamp": "2026-04-23T14:05:12+0200",
   "branch": "main",

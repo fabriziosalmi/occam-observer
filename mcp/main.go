@@ -45,7 +45,7 @@ import (
 
 const (
 	serverName       = "occam-observer-mcp"
-	serverVersion    = "3.1.0"
+	serverVersion    = "0.2.0"
 	protocolVersion  = "2024-11-05"
 	analyzerTimeout  = 60 * time.Second
 	// Frame cap tightened from 8 MiB → 512 KiB. MCP clients realistically

@@ -1,5 +1,7 @@
 # Occam Observer
 
+**v0.2.0** · [Changelog](#changelog)
+
 > *Out-of-band, agent-friendly Git telemetry.*
 
 Occam Observer watches a Git repository from the outside and turns every save
@@ -371,6 +373,74 @@ cd docs && npm ci && npm run docs:dev
 | 1    | `--check` severity ≥ `--fail-on`                               |
 | 2    | Engine runtime error                                           |
 | 3    | Bad CLI arguments / invalid config                             |
+
+## Changelog
+
+### v0.2.0 — 2026-04-23
+
+The "observer grew a nervous system" release. Occam went from a single-file
+bash telemetry TUI to a full agent-facing platform.
+
+**Engine**
+- RFC 8259 JSON escape; `--check --fail-on=LEVEL` gate mode with exit codes
+- `--diff=head|staged|working`; `--validate` against `config/schema.json`
+- `violations[]` with per-line git-blame provenance; pluggable analyzer
+  protocol (`analyzers/*` — stdin=diff, stdout=findings)
+- Reference analyzers: Semgrep adapter, Python AST POC
+  (eval/exec/pickle/shell=True/cyclomatic)
+- Severity ladder (none → critical) escalated by analyzer findings
+- Structured JSON logs with `trace_id` propagation
+- Cache file atomically created at mode 0600 (no TOCTOU window)
+
+**Gateway (api/main.go)**
+- `/trend` over SQLite WAL TSDB
+- `/healthz`, `/readyz`, `/metrics` (Prometheus text)
+- `X-Trace-Id` middleware, request log, 30 s analyze timeout
+- Background goroutine refreshes gauges (no sqlite3 fork per scrape)
+- All data endpoints now same-origin only (removed `CORS *`)
+
+**MCP server (mcp/)**
+- Standalone Go binary `occam-mcp`, stdio JSON-RPC 2.0, protocol
+  `2024-11-05`. Compatible with Claude Desktop, Cursor, Windsurf, VS Code /
+  Copilot Chat, Zed, Continue. 20 tools total; per-client setup snippets in
+  [docs/guide/mcp.md](docs/guide/mcp.md).
+
+**Coordination API (for multi-agent systems)**
+- 13 ready endpoints + 6 documented 501 stubs for repo context, blame,
+  churn, diff, file imports/exports/fingerprint, symbol lookup,
+  agent-identity, observations log, file-level claims, contract.
+- New SQLite tables `observations` + `claims` (WAL, auto-GC on expire).
+- Python symbol indexer (`analyzers/python-symbol-index.py`) backing
+  `/symbol`, `/file/imports`, `/file/exports`, ast_hash.
+- See [docs/guide/coordination-api.md](docs/guide/coordination-api.md) for
+  the normative contract and [docs/guide/walkthrough.md](docs/guide/walkthrough.md)
+  for a real end-to-end API trace.
+
+**Dashboard (web/src/App.tsx)**
+- Full Typescript type definitions (no `any`)
+- Error UI, AbortController, `visibilitychange` pause, a11y (aria-live,
+  role=meter, sr-only labels, motion-reduce)
+- Shows new fields: `trace_id`, `diff_mode`, `check.level` ribbon,
+  violations with blame, analyzer findings, perf footer
+
+**DevEx**
+- `run_tests.sh` unified runner; 6 regression suites, 97 assertions
+- Dockerfile (API-only runtime)
+- `hooks/pre-commit` (advisory / gating via `OCCAM_HOOK_FAIL_ON=LEVEL`)
+- `.github/workflows/tests.yml` (bash -n, `go vet`, `--validate`, tests)
+- `scripts/build-ui.sh` for web → api/public static deploy
+
+**Docs**
+- README/docs rewrite — honest stack (bash + Go + Python + React)
+- `docs/guide/` pages: architecture, state-vectors, semantic-mappings,
+  mcp, coordination-api, walkthrough
+- Every hardcoded personal path scrubbed
+- VitePress sidebar repaired (previously pointed at nonexistent pages)
+
+### v0.1.0 — 2026-04-23
+
+Initial commit — bash TUI telemetry engine + minimal Go gateway + React
+dashboard skeleton.
 
 ## License
 

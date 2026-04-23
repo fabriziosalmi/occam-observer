@@ -1,6 +1,6 @@
 {
   "name": "occam-observer-docs",
-  "version": "3.1.0",
+  "version": "0.2.0",
   "description": "VitePress site for Occam Observer",
   "private": true,
   "scripts": {
