@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # occam — convenience CLI for everyday operation.
 #
-#   ./occam start                 build (if needed) + run the Go gateway in background
-#   ./occam stop                  stop the gateway
+#   ./occam start [PATH]          build gateway + start it; if PATH given,
+#                                 also spawn a headless filesystem watcher so
+#                                 the dashboard stays live as you edit
+#   ./occam stop                  stop gateway + watcher
 #   ./occam status                running? PID? port? DB?
 #   ./occam restart               stop + start
 #   ./occam logs [-f]             show the gateway log (tail -f with -f)
@@ -31,6 +33,10 @@ MCP_BIN="${SCRIPT_DIR}/occam-mcp"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
 PID_FILE="${RUNTIME_DIR}/occam-gateway.pid"
 LOG_FILE="${RUNTIME_DIR}/occam-gateway.log"
+WATCHER_PID_FILE="${RUNTIME_DIR}/occam-watcher.pid"
+WATCHER_LOG_FILE="${RUNTIME_DIR}/occam-watcher.log"
+WATCHER_TARGET_FILE="${RUNTIME_DIR}/occam-watcher.target"
+CACHE_FILE_DEFAULT="/tmp/occam_state.json"
 
 DEFAULT_PORT=9999
 OCCAM_PORT="${OCCAM_PORT:-$DEFAULT_PORT}"
@@ -61,13 +67,16 @@ occam_version() {
 }
 
 # ── PID helpers ───────────────────────────────────────────────────────────────
-read_pid() {
-    [ -f "$PID_FILE" ] || return 1
-    local p; p="$(cat "$PID_FILE" 2>/dev/null)"
+read_pid_file() {
+    local file="$1"
+    [ -f "$file" ] || return 1
+    local p; p="$(cat "$file" 2>/dev/null)"
     case "$p" in ''|*[!0-9]*) return 1 ;; esac
     kill -0 "$p" 2>/dev/null || return 1
     printf '%s' "$p"
 }
+read_pid()         { read_pid_file "$PID_FILE"; }
+read_watcher_pid() { read_pid_file "$WATCHER_PID_FILE"; }
 
 # ── Builds ────────────────────────────────────────────────────────────────────
 build_if_stale() {
@@ -88,64 +97,117 @@ build_if_stale() {
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 cmd_start() {
+    # Optional first positional arg: an absolute path to watch. If given,
+    # spawn the engine in headless --watch mode so the dashboard stays live
+    # without the full TUI taking over a terminal.
+    local watch_target="${1:-}"
+    if [ -n "$watch_target" ]; then
+        watch_target="$(cd "$watch_target" 2>/dev/null && pwd)" \
+            || die "watch target not accessible: $1"
+        [ -d "$watch_target/.git" ] || die "watch target is not a git repo: $watch_target"
+    fi
+
     if pid=$(read_pid); then
         ok "gateway already running (pid=$pid on port ${OCCAM_PORT})"
-        return 0
-    fi
-    build_if_stale "$GATEWAY_BIN" "$API_DIR"
-    [ -x "$ENGINE_SCRIPT" ] || die "engine script not executable: $ENGINE_SCRIPT"
+    else
+        build_if_stale "$GATEWAY_BIN" "$API_DIR"
+        [ -x "$ENGINE_SCRIPT" ] || die "engine script not executable: $ENGINE_SCRIPT"
+        mkdir -p "$(dirname "$OCCAM_DB")"
 
-    # Ensure DB directory exists so the gateway can init schemas on first hit.
-    mkdir -p "$(dirname "$OCCAM_DB")"
+        info "starting gateway on 127.0.0.1:${OCCAM_PORT}"
+        (
+            ENGINE_SCRIPT="$ENGINE_SCRIPT" \
+            OCCAM_DB="$OCCAM_DB" \
+            API_PORT="$OCCAM_PORT" \
+            exec "$GATEWAY_BIN"
+        ) > "$LOG_FILE" 2>&1 &
+        pid=$!
+        disown "$pid" 2>/dev/null || true
+        printf '%s\n' "$pid" > "$PID_FILE"
 
-    info "starting gateway on 127.0.0.1:${OCCAM_PORT}"
-    (
-        ENGINE_SCRIPT="$ENGINE_SCRIPT" \
-        OCCAM_DB="$OCCAM_DB" \
-        API_PORT="$OCCAM_PORT" \
-        exec "$GATEWAY_BIN"
-    ) > "$LOG_FILE" 2>&1 &
-    local pid=$!
-    # Detach from our shell so ctrl+c here doesn't kill it.
-    disown "$pid" 2>/dev/null || true
-    printf '%s\n' "$pid" > "$PID_FILE"
-
-    # Wait up to 3s for the port to respond.
-    local i=0
-    while [ $i -lt 30 ]; do
-        if curl -sf "http://127.0.0.1:${OCCAM_PORT}/healthz" >/dev/null 2>&1; then
-            ok "gateway up (pid=$pid, port=${OCCAM_PORT}, log=${LOG_FILE})"
-            printf "  %sanalyze:%s  curl '%s/analyze?path=/abs/repo'\n" "$C_DIM" "$C_RESET" "http://127.0.0.1:${OCCAM_PORT}"
-            printf "  %sui:%s       http://127.0.0.1:${OCCAM_PORT}/ui/\n"          "$C_DIM" "$C_RESET"
-            return 0
+        local i=0
+        while [ $i -lt 30 ]; do
+            if curl -sf "http://127.0.0.1:${OCCAM_PORT}/healthz" >/dev/null 2>&1; then
+                ok "gateway up (pid=$pid, port=${OCCAM_PORT}, log=${LOG_FILE})"
+                break
+            fi
+            sleep 0.1; i=$((i+1))
+        done
+        if [ $i -ge 30 ]; then
+            err "gateway did not respond within 3s; tail of log:"
+            tail -20 "$LOG_FILE" >&2
+            return 1
         fi
-        sleep 0.1
-        i=$((i+1))
-    done
-    err "gateway did not respond within 3s; tail of log:"
-    tail -20 "$LOG_FILE" >&2
-    return 1
+    fi
+
+    # If a target was specified, start (or replace) the headless watcher.
+    if [ -n "$watch_target" ]; then
+        if wpid=$(read_watcher_pid); then
+            info "stopping existing watcher (pid=$wpid)"
+            kill "$wpid" 2>/dev/null || true
+            wait "$wpid" 2>/dev/null || true
+            rm -f "$WATCHER_PID_FILE"
+        fi
+        info "starting watcher on $watch_target"
+        (
+            CACHE_FILE="$CACHE_FILE_DEFAULT" \
+            OCCAM_DB="$OCCAM_DB" \
+            exec "$ENGINE_SCRIPT" --watch "$watch_target"
+        ) > "$WATCHER_LOG_FILE" 2>&1 &
+        wpid=$!
+        disown "$wpid" 2>/dev/null || true
+        printf '%s\n' "$wpid" > "$WATCHER_PID_FILE"
+        printf '%s\n' "$watch_target" > "$WATCHER_TARGET_FILE"
+        # Give the watcher a beat to seed the cache file.
+        sleep 0.5
+        if kill -0 "$wpid" 2>/dev/null; then
+            ok "watcher up (pid=$wpid, target=$watch_target)"
+        else
+            err "watcher failed to start; tail of log:"
+            tail -20 "$WATCHER_LOG_FILE" >&2
+            rm -f "$WATCHER_PID_FILE" "$WATCHER_TARGET_FILE"
+            return 1
+        fi
+    fi
+
+    printf "  %sanalyze:%s  curl 'http://127.0.0.1:%s/analyze?path=/abs/repo'\n" "$C_DIM" "$C_RESET" "$OCCAM_PORT"
+    printf "  %sui:%s       http://127.0.0.1:%s/ui/\n"          "$C_DIM" "$C_RESET" "$OCCAM_PORT"
+    if [ -n "$watch_target" ]; then
+        printf "  %stip:%s      save any file under %s and the dashboard updates live\n" "$C_DIM" "$C_RESET" "$watch_target"
+    else
+        printf "  %shint:%s     ./occam start /path/to/repo  — spawns a live watcher too\n" "$C_DIM" "$C_RESET"
+    fi
+}
+
+_kill_pidfile() {
+    local label="$1" pidfile="$2"
+    local p
+    if p="$(read_pid_file "$pidfile")"; then
+        info "stopping $label (pid=$p)"
+        kill "$p" 2>/dev/null || true
+        local i=0
+        while kill -0 "$p" 2>/dev/null && [ $i -lt 20 ]; do
+            sleep 0.1; i=$((i+1))
+        done
+        if kill -0 "$p" 2>/dev/null; then
+            warn "$label (pid=$p) didn't exit on SIGTERM, sending SIGKILL"
+            kill -9 "$p" 2>/dev/null || true
+        fi
+        rm -f "$pidfile"
+        ok "$label stopped"
+    else
+        rm -f "$pidfile" 2>/dev/null
+        return 1
+    fi
 }
 
 cmd_stop() {
-    if pid=$(read_pid); then
-        info "stopping gateway (pid=$pid)"
-        kill "$pid" 2>/dev/null || true
-        # Give it a breath, then SIGKILL if still alive.
-        local i=0
-        while kill -0 "$pid" 2>/dev/null && [ $i -lt 20 ]; do
-            sleep 0.1; i=$((i+1))
-        done
-        if kill -0 "$pid" 2>/dev/null; then
-            warn "pid=$pid didn't exit on SIGTERM, sending SIGKILL"
-            kill -9 "$pid" 2>/dev/null || true
-        fi
-        rm -f "$PID_FILE"
-        ok "gateway stopped"
-    else
-        warn "gateway not running (no valid pid file)"
-        rm -f "$PID_FILE" 2>/dev/null
-    fi
+    local any=0
+    _kill_pidfile "watcher" "$WATCHER_PID_FILE" && any=1
+    rm -f "$WATCHER_TARGET_FILE" 2>/dev/null
+    _kill_pidfile "gateway" "$PID_FILE"         && any=1
+    [ $any -eq 0 ] && warn "nothing to stop (no valid pid files)"
+    return 0
 }
 
 cmd_restart() {
@@ -178,6 +240,15 @@ cmd_status() {
     else
         warn "not running"
     fi
+    printf "\n  %swatcher%s\n" "$C_BOLD" "$C_RESET"
+    if wpid=$(read_watcher_pid); then
+        local tgt="(unknown)"
+        [ -f "$WATCHER_TARGET_FILE" ] && tgt="$(cat "$WATCHER_TARGET_FILE")"
+        ok "running (pid=$wpid, target=$tgt)"
+    else
+        warn "not running — dashboard may show stale data. ./occam start /path/to/repo"
+    fi
+
     printf "\n  %stsdb%s\n" "$C_BOLD" "$C_RESET"
     if [ -f "$OCCAM_DB" ]; then
         if command -v sqlite3 >/dev/null 2>&1; then
@@ -283,10 +354,10 @@ cmd_doctor() {
 
 cmd_clean() {
     local all="${1:-}"
-    info "removing gateway log: $LOG_FILE"
-    rm -f "$LOG_FILE"
-    info "removing pid file: $PID_FILE"
-    rm -f "$PID_FILE"
+    info "removing logs: $LOG_FILE, $WATCHER_LOG_FILE"
+    rm -f "$LOG_FILE" "$WATCHER_LOG_FILE"
+    info "removing pid files"
+    rm -f "$PID_FILE" "$WATCHER_PID_FILE" "$WATCHER_TARGET_FILE"
     info "removing write-through cache: /tmp/occam_state.json + /tmp/occam_json_* + /tmp/occam_state_*"
     rm -f /tmp/occam_state.json /tmp/occam_json_*.json /tmp/occam_state_*.json 2>/dev/null
     if [ "$all" = "--all" ]; then
@@ -335,7 +406,7 @@ EOF
 }
 
 cmd_help() {
-    sed -n '2,19p' "${BASH_SOURCE[0]}" | sed -E 's/^# ?//'
+    sed -n '2,21p' "${BASH_SOURCE[0]}" | sed -E 's/^# ?//'
 }
 
 # ── Dispatch ──────────────────────────────────────────────────────────────────

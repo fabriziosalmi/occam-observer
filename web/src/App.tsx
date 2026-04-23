@@ -506,10 +506,25 @@ export default function App() {
               </h3>
 
               {!data.intelligence || data.is_idle ? (
-                <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground border-2 border-dashed border-border/50 rounded-xl p-8 bg-background/50">
+                <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground border-2 border-dashed border-border/50 rounded-xl p-8 bg-background/50 text-center">
                   <CheckCircle2 className="w-8 h-8 mb-3 opacity-50" aria-hidden="true" />
-                  <p className="font-medium text-foreground">Working tree is clean</p>
-                  <p className="text-sm mt-1">Edit the target repository to see live semantic extraction.</p>
+                  <p className="font-medium text-foreground">
+                    {data.is_idle ? "Working tree is clean" : "No diff collected yet"}
+                  </p>
+                  <p className="text-sm mt-1 max-w-md">
+                    {data.is_idle ? (
+                      <>No uncommitted changes in{" "}
+                        <code className="text-xs bg-secondary px-1 py-0.5 rounded">
+                          {data.target?.split("/").slice(-2).join("/") || "the target"}
+                        </code>. Save any file under it and the dashboard will update live.
+                      </>
+                    ) : (
+                      <>Start a watcher to keep this dashboard live:{" "}
+                        <code className="text-xs bg-secondary px-1 py-0.5 rounded">./occam start /path/to/repo</code>
+                        , or trigger a one-shot analysis from the playground below.
+                      </>
+                    )}
+                  </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

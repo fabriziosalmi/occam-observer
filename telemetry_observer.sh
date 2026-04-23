@@ -842,8 +842,12 @@ render_dashboard() {
 
     # ── CACHE WRITE-THROUGH: update JSON before rendering ─────────────────────
     local ts_iso; ts_iso="$(date '+%Y-%m-%dT%H:%M:%S%z')"
-    local is_dirty_flag="true"
-    [ -z "$diff_content" ] && is_dirty_flag="false"
+    # is_idle means "nothing to show" (empty diff). Historical bug: this
+    # flag was carrying `is_dirty` semantics while the JSON field was named
+    # `is_idle`, so the UI flipped its empty-state branches. Keep the JSON
+    # field name — just compute it correctly.
+    local is_idle_flag="false"
+    [ -z "$diff_content" ] && is_idle_flag="true"
 
     local branch shash
     branch="$(git -C "$target" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
@@ -1032,7 +1036,7 @@ render_dashboard() {
     local _perf_json
     _perf_json="{\"engine_duration_ms\":${_dur_ms:-0},\"diff_bytes\":${_diff_bytes:-0},\"analyzers_run\":${_analyzers_run}}"
 
-    write_cache "$is_dirty_flag" "${branch}" "${shash}" "$ts_iso" \
+    write_cache "$is_idle_flag" "${branch}" "${shash}" "$ts_iso" \
         "$sec_count" "$insertions" "$deletions" "$files_changed" \
         "$complexity" "$test_file_count" "$hygiene_count" "$health" \
         "$sec_snippet" "$hygiene_snippet" "$intel_json" "$git_json" \
@@ -1198,7 +1202,7 @@ run_inotifywait_loop() {
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 main() {
-    local cfg_arg="" pos_target="" is_json_mode="false" is_check_mode="false" is_validate_mode="false"
+    local cfg_arg="" pos_target="" is_json_mode="false" is_check_mode="false" is_validate_mode="false" is_watch_mode="false"
     local fail_on="high"
     DIFF_MODE="head"
     while [[ $# -gt 0 ]]; do
@@ -1208,6 +1212,7 @@ main() {
             --json)      is_json_mode="true"; shift ;;
             --check)     is_check_mode="true"; is_json_mode="true"; shift ;;
             --validate)  is_validate_mode="true"; shift ;;
+            --watch)     is_watch_mode="true"; shift ;;
             --fail-on)   [[ $# -ge 2 ]] || { echo "Error: --fail-on requires a level" >&2; exit 3; }
                          fail_on="$2"; shift 2 ;;
             --fail-on=*) fail_on="${1#--fail-on=}"; shift ;;
@@ -1228,6 +1233,9 @@ OPTIONS
   --diff=MODE             diff revision pair: head|staged|working (default: head)
   --staged                shorthand for --diff=staged
   --working               shorthand for --diff=working
+  --watch                 headless filesystem watcher — re-analyzes on save
+                          and writes \$CACHE_FILE (no TUI, no API server).
+                          Pair with the Go gateway for live dashboards.
   --validate              validate config/main.yml + config/rules/*.yml and exit
   --config FILE           YAML config (default: ./config/main.yml)
   --help, -h              this screen
@@ -1307,6 +1315,35 @@ USAGE
                 "diff_mode=$DIFF_MODE"
             [ "$passed" = "false" ] && exit 1
         fi
+        exit 0
+    fi
+
+    # ── Headless watcher mode ────────────────────────────────────────────────
+    # Drives the same filesystem watchers as interactive TUI, but writes to
+    # $CACHE_FILE silently (no spinner, no screen buffer, no internal API
+    # server). Pair with the Go gateway (./occam start) so the dashboard
+    # stays live without the terminal UI taking over.
+    if [[ "$is_watch_mode" == "true" ]]; then
+        detect_os_watcher
+        log_json info "watcher starting" "target=$TARGET_PATH" "cache=$CACHE_FILE" "watcher=$OS_WATCHER"
+        # Seed the cache synchronously so /ui/ has data immediately.
+        render_dashboard "$TARGET_PATH" > /dev/null 2>&1 || true
+        case "$OS_WATCHER" in
+            fswatch)
+                local secs; secs="$(_debounce_secs)"
+                while read -r _ev; do
+                    render_dashboard "$TARGET_PATH" > /dev/null 2>&1 || true
+                done < <(fswatch -o -r -l "$secs" --event Updated -e "\.git" "$TARGET_PATH" 2>/dev/null)
+                ;;
+            inotifywait)
+                local secs; secs="$(_debounce_secs)"
+                inotifywait -m -r -e close_write --exclude "\.git" --format "%f" -q "$TARGET_PATH" 2>/dev/null \
+                | while read -r _f; do
+                    while read -r -t "$secs" _junk 2>/dev/null || read -r -t 1 _junk 2>/dev/null; do :; done
+                    render_dashboard "$TARGET_PATH" > /dev/null 2>&1 || true
+                done
+                ;;
+        esac
         exit 0
     fi
 
