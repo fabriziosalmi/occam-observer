@@ -1,17 +1,14 @@
 {
-  "name": "docs",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "occam-observer-docs",
+  "version": "3.1.0",
+  "description": "VitePress site for Occam Observer",
+  "private": true,
   "scripts": {
-    "docs:dev": "vitepress dev",
-    "docs:build": "vitepress build",
+    "docs:dev":     "vitepress dev",
+    "docs:build":   "vitepress build",
     "docs:preview": "vitepress preview"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "license": "MIT",
   "devDependencies": {
     "vitepress": "^1.6.4",
     "vue": "^3.5.33"

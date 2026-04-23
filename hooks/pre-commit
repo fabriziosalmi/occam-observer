@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Occam Observer — pre-commit hook (scoring only, never blocks).
+#
+# Install:
+#   ln -s "$PWD/hooks/pre-commit" .git/hooks/pre-commit
+# or with `git config core.hooksPath hooks` to point the whole hooks/ dir.
+#
+# Behavior: runs `telemetry_observer.sh --json --staged` on the repo root and
+# prints a concise summary line to stderr. ALWAYS exits 0 so a noisy hook
+# never blocks the user's commit flow — it's purely advisory telemetry.
+# Setting OCCAM_HOOK_FAIL_ON=LEVEL turns it into a gate (exit 1 when severity
+# meets/exceeds the level). Recommended only for solo agent-driven workflows
+# where false positives are cheap to inspect.
+set -u
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+[ -z "$repo_root" ] && exit 0
+
+# Locate observer:
+#   1. $OCCAM_OBSERVER if set
+#   2. $repo_root/telemetry_observer.sh   (in-repo install)
+#   3. first on $PATH
+observer="${OCCAM_OBSERVER:-}"
+if [ -z "$observer" ]; then
+    if   [ -x "$repo_root/telemetry_observer.sh" ]; then observer="$repo_root/telemetry_observer.sh"
+    elif command -v telemetry_observer.sh >/dev/null 2>&1; then observer="$(command -v telemetry_observer.sh)"
+    fi
+fi
+[ -z "$observer" ] && exit 0   # silently skip if not installed
+
+# Fast path: agents commit often; jq is expected.
+command -v jq >/dev/null 2>&1 || exit 0
+
+fail_on="${OCCAM_HOOK_FAIL_ON:-}"
+if [ -n "$fail_on" ]; then
+    "$observer" --check --fail-on="$fail_on" --staged "$repo_root" > /tmp/occam_hook_$$.json 2>/dev/null
+    rc=$?
+else
+    "$observer" --json --staged "$repo_root" > /tmp/occam_hook_$$.json 2>/dev/null
+    rc=0
+fi
+out="/tmp/occam_hook_$$.json"
+
+level="$(jq -r '.check.level    // "?"' "$out" 2>/dev/null)"
+score="$(jq -r '.health_score   // "?"' "$out" 2>/dev/null)"
+sec="$(  jq -r '.metrics.security_violations // 0' "$out" 2>/dev/null)"
+mass="$( jq -r '.metrics.mass_insertions     // 0' "$out" 2>/dev/null)"
+files="$(jq -r '.metrics.mass_files_changed  // 0' "$out" 2>/dev/null)"
+
+printf '\033[2m[occam]\033[0m health=%s level=%s sec=%s ins=%s files=%s\n' \
+    "$score" "$level" "$sec" "$mass" "$files" >&2
+
+if [ "$level" != "none" ] && [ "$level" != "?" ]; then
+    reasons="$(jq -r '.check.reasons | join(", ")' "$out" 2>/dev/null)"
+    [ -n "$reasons" ] && printf '\033[2m[occam]\033[0m reasons: %s\n' "$reasons" >&2
+fi
+
+rm -f "$out"
+[ -n "$fail_on" ] && exit "$rc"
+exit 0

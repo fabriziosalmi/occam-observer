@@ -40,4 +40,6 @@ api/server.exe
 # Temporary and test files
 /tmp/
 *.log
-test_*
+# Legacy ad-hoc test stubs (root-level only). The real regression suite
+# lives under tests/ and is tracked.
+/test_*

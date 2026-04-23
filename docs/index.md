@@ -3,29 +3,55 @@ layout: home
 
 hero:
   name: "Occam Observer"
-  text: "Out-of-Band Git Telemetry"
-  tagline: Zero-latency semantic analysis and health telemetry for Git repositories. Designed for human reviewers and AI agents.
+  text: "Out-of-band Git telemetry"
+  tagline: Agent-friendly health signals, severity-graded checks, and pluggable analyzers for any local repository.
   actions:
     - theme: brand
       text: Get Started
       link: /guide/getting-started
     - theme: alt
-      text: View API Reference
+      text: REST API
       link: /api/telemetry
+    - theme: alt
+      text: GitHub
+      link: https://github.com/fabriziosalmi/occam-observer
 
 features:
-  - title: Zero-Latency Architecture
-    details: Written in pure Bash and Go. Leverages high-speed Unix pipelines (grep, awk, mktemp) for instant sub-millisecond analysis without node_modules overhead.
-  - title: Deep Intelligence
-    details: Automatically extracts semantic mappings including infrastructure changes, schema mutations, network requests, and new function signatures.
-  - title: O(1) Cache Reads
-    details: Features an embedded CQRS pattern. The Go API Gateway serves the JSON cache with strict O(1) latency, perfect for high-throughput AI agents.
-  - title: Beautiful Dashboard
-    details: Ships with a modern React+Tailwind UI dashboard showing live telemetry vectors, git metadata, and an interactive API playground.
+  - title: MCP-native
+    details: Ships a stdio JSON-RPC server (occam-mcp) compatible with Claude Desktop, Cursor, Windsurf, VS Code / Copilot Chat, Zed, Continue. Agents get structured tools instead of parsing curl output.
+  - title: Built for AI agents
+    details: JSON-correct by construction, RFC 8259 escaping, X-Trace-Id correlation end-to-end, exit codes on --check --fail-on that plug straight into CI or agent pipelines.
+  - title: Pluggable analyzers
+    details: Drop any executable into analyzers/. Ships with a Semgrep adapter and a Python-AST POC. Critical/high findings auto-escalate the check verdict.
+  - title: Three diff modes
+    details: --diff=head, --staged, --working — inspect exactly the slice of work you care about. Per-line blame shows whether a violation is brand new or pre-existing.
+  - title: Time-series + self-obs
+    details: SQLite TSDB (WAL) with a /trend endpoint, plus /healthz, /readyz, and a Prometheus /metrics scrape target out of the box.
 ---
 
-## Why Occam Observer?
+## What it does
 
-Traditional CI/CD tools wait until code is pushed to analyze it. **Occam Observer** runs locally, instantly parsing `git diff` on every file save to evaluate code health, security violations, and tech debt *before* it's even committed. 
+Occam Observer runs the [bash engine](https://github.com/fabriziosalmi/occam-observer/blob/main/telemetry_observer.sh)
+against any local Git repository and emits a single JSON payload per analysis
+covering:
 
-With the new v3.0 Intelligence Engine, it provides unparalleled semantic mappings so that AI co-pilots and security tools understand precisely *what* logic has changed in real-time.
+- **Five metric vectors** — security, mass, entropy, testing, debt
+- **An intelligence block** — infrastructure/schema/network changes,
+  signatures, dependencies, per-line violations with `git blame` provenance
+- **Analyzer findings** — merged results from Semgrep, the built-in Python
+  AST walker, and any custom plugin you drop in
+- **A derived check verdict** — `none` / `low` / `medium` / `high` / `critical`
+  with machine-parseable reasons
+- **Self-metrics** — engine duration, diff size, analyzers run, prometheus
+  scrape on the gateway side
+
+The Go HTTP gateway (`api/main.go`) fronts the engine with `/`, `/analyze`,
+`/trend`, `/healthz`, `/readyz`, `/metrics`. Every request is traced with
+`X-Trace-Id`, so engine logs and gateway logs correlate without extra work.
+
+## What it is not
+
+- Not a CI replacement. It's a **local** telemetry daemon and pre-commit gate.
+- Not a full tree-sitter engine yet — the Python AST analyzer is a POC
+  showing the pluggable protocol; extend via `analyzers/`.
+- Not multi-user. Single-node, single-writer against the cache file and DB.

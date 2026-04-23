@@ -1,73 +1,47 @@
-# React + TypeScript + Vite
+# web/
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite + Tailwind source for the Occam Observer dashboard.
 
-Currently, two official plugins are available:
+The Go gateway (`api/main.go`) serves the **built** bundle from
+`api/public/` at `http://127.0.0.1:9999/ui/`. This directory is the
+*source*; `api/public/` is the deployed artifact.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Develop
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd web
+npm ci
+npm run dev      # Vite dev server (typically http://localhost:5173/)
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Run the engine separately (`./telemetry_observer.sh /path/to/repo`) and
+the UI will poll `GET /` for live data.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Build → deploy to `api/public/`
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+From the repo root:
+
+```bash
+./scripts/build-ui.sh
 ```
+
+This runs `npm ci` (if needed) + `npm run build` inside `web/`, then
+replaces `api/public/` with the fresh bundle. Commit the updated artifacts
+if you want `go run ./api` to ship the new UI out of the box.
+
+## Source layout
+
+- `src/App.tsx` — single-page dashboard
+- `src/index.css` / `App.css` — Tailwind directives + theme tokens
+- `index.html` — Vite entry (imports `src/main.tsx`)
+- `tailwind.config.js` / `postcss.config.js` — styling pipeline
+- `vite.config.ts` — `base: "./"` so the bundle is relocatable under `/ui/`
+
+## Data contract
+
+The dashboard polls `GET /` every second and `GET /analyze?path=…` on
+demand from the playground. Response schema: [`docs/api/telemetry.md`](../docs/api/telemetry.md).
+
+The component is defensive against missing optional fields (older engine
+versions, partial cache writes), but schema drift should be resolved by
+bumping the engine rather than by adding UI fallbacks.

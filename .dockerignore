@@ -1,0 +1,11 @@
+.git
+.github
+.gitignore
+docs
+web
+test_*.sh
+tests
+run_tests.sh
+hooks
+README.md
+*.md

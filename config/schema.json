@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/fabriziosalmi/occam-observer/config/schema.json",
+  "title": "Occam Observer — Main Config",
+  "description": "YAML is loaded by the awk FSM parser; constraints below are enforced at startup by telemetry_observer.sh --validate.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "target_path": {
+      "type": "string",
+      "description": "Absolute path to the git repository to monitor."
+    },
+    "threshold_mass_warn": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000,
+      "default": 150
+    },
+    "threshold_mass_critical": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000,
+      "default": 300
+    },
+    "threshold_entropy_warn": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000,
+      "default": 5
+    },
+    "threshold_entropy_critical": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000,
+      "default": 10
+    },
+    "bell_on_critical": {
+      "type": "string",
+      "enum": ["true", "false"],
+      "default": "true"
+    },
+    "startup_delay": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 60,
+      "default": 1
+    },
+    "api_port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "default": 9999
+    }
+  },
+  "cross_checks": [
+    "threshold_mass_warn < threshold_mass_critical",
+    "threshold_entropy_warn < threshold_entropy_critical"
+  ],
+  "rules_files": {
+    "config/rules/security.yml": "patterns (ERE string, array auto-joined by yaml_get)",
+    "config/rules/entropy.yml":  "patterns",
+    "config/rules/debt.yml":     "patterns",
+    "config/rules/tests.yml":    "patterns or patterns_validation"
+  }
+}
