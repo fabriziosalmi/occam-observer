@@ -94,12 +94,13 @@ CREATE INDEX IF NOT EXISTS idx_claims_exp ON claims(expires_at);
 
 func registerCoordinationRoutes() {
 	// Git-backed reads
-	http.HandleFunc("/repo/context",   withTraceID(handleRepoContext))
-	http.HandleFunc("/repo/blame/",    withTraceID(handleRepoBlame))   // prefix match: /repo/blame/<path>
-	http.HandleFunc("/repo/churn/",    withTraceID(handleRepoChurn))   // prefix match
-	http.HandleFunc("/diff",           withTraceID(handleDiff))
+	http.HandleFunc("/repo/context",     withTraceID(handleRepoContext))
+	http.HandleFunc("/repo/fingerprint", withTraceID(handleRepoFingerprint))
+	http.HandleFunc("/repo/blame/",      withTraceID(handleRepoBlame))   // prefix match: /repo/blame/<path>
+	http.HandleFunc("/repo/churn/",      withTraceID(handleRepoChurn))   // prefix match
+	http.HandleFunc("/diff",             withTraceID(handleDiff))
 	http.HandleFunc("/file/fingerprint", withTraceID(handleFileFingerprint))
-	http.HandleFunc("/agent/identity/", withTraceID(handleAgentIdentity)) // prefix match
+	http.HandleFunc("/agent/identity/",  withTraceID(handleAgentIdentity)) // prefix match
 
 	// State-backed
 	http.HandleFunc("/observation",    withTraceID(handleObservation))     // POST
@@ -473,6 +474,582 @@ func handleRepoContext(w http.ResponseWriter, r *http.Request) {
 		},
 		"hot_files":    hot,
 		"stable_files": stables,
+	})
+}
+
+// ── /repo/fingerprint ────────────────────────────────────────────────────────
+//
+// Stable, content-grounding "what is this repo" snapshot for coding agents
+// that need to validate doc/config content against actual repo reality
+// (anti-hallucination guard). Deliberately SEPARATE from /repo/context
+// (which focuses on churn + recency): a fingerprint is time-invariant
+// given a commit — same HEAD → same answer, regardless of when asked.
+//
+// Response shape:
+//   {
+//     "target":              "/abs/path",
+//     "commit_sha":          "abc123…",
+//     "computed_at":         "2026-04-23T22:15:00Z",
+//     "languages":           [{"name":"Rust","files":47}, …],  // sorted by files desc
+//     "stack":               ["rust/cargo","github-actions"],
+//     "declared_deps":       {"rust":["clap","serde",…], "npm":[], …},
+//     "declared_frameworks": ["clap"],    // canonical names, sorted
+//     "entrypoints":         ["src/main.rs"],
+//     "manifest_files":      ["Cargo.toml"]
+//   }
+//
+// Silent-fail on per-manifest parse errors — the fingerprint is a best-
+// effort read, not a validator. An unparseable Cargo.toml yields an empty
+// "rust" deps list; other languages still compute.
+
+// depToFramework maps a declared dep name to a canonical framework
+// identifier. Small on purpose — extend only when a new framework
+// genuinely helps ground content (e.g. doc cites "React" in a Rust
+// repo). Keys are case-insensitive (lowercased before lookup).
+var depToFramework = map[string]string{
+	// Frontend (JS/TS)
+	"react":             "react",
+	"preact":            "preact",
+	"vue":               "vue",
+	"@vue/cli":          "vue",
+	"svelte":            "svelte",
+	"@angular/core":     "angular",
+	"solid-js":          "solid",
+	"lit":               "lit",
+	// Meta-frameworks
+	"next":              "next",
+	"nuxt":              "nuxt",
+	"@sveltejs/kit":     "sveltekit",
+	"@remix-run/react":  "remix",
+	"gatsby":            "gatsby",
+	"astro":             "astro",
+	// State
+	"redux":             "redux",
+	"@reduxjs/toolkit":  "redux",
+	"zustand":           "zustand",
+	"mobx":              "mobx",
+	"jotai":             "jotai",
+	"pinia":             "pinia",
+	// Node backend
+	"express":           "express",
+	"fastify":           "fastify",
+	"koa":               "koa",
+	"@nestjs/core":      "nestjs",
+	"hapi":              "hapi",
+	// UI libs
+	"tailwindcss":       "tailwindcss",
+	"@mui/material":     "mui",
+	"@chakra-ui/react":  "chakra",
+	"antd":              "antd",
+	"bootstrap":         "bootstrap",
+	// Python web
+	"django":            "django",
+	"flask":             "flask",
+	"fastapi":           "fastapi",
+	"starlette":         "starlette",
+	"tornado":           "tornado",
+	"bottle":            "bottle",
+	// Python CLI
+	"click":             "click",
+	"typer":             "typer",
+	// Python data
+	"sqlalchemy":        "sqlalchemy",
+	"pydantic":          "pydantic",
+	// Go
+	"github.com/gin-gonic/gin": "gin",
+	"github.com/labstack/echo": "echo",
+	"github.com/gofiber/fiber": "fiber",
+	"github.com/go-chi/chi":    "chi",
+	"github.com/spf13/cobra":   "cobra",
+	"github.com/urfave/cli":    "urfave-cli",
+	// Rust
+	"actix-web":         "actix",
+	"rocket":            "rocket",
+	"axum":              "axum",
+	"warp":              "warp",
+	"tide":              "tide",
+	"poem":              "poem",
+	"clap":              "clap",
+	"structopt":         "structopt",
+	"tokio":             "tokio",
+	"serde":             "serde",
+	// Test runners
+	"jest":              "jest",
+	"vitest":            "vitest",
+	"mocha":             "mocha",
+	"pytest":            "pytest",
+}
+
+// inferFrameworks maps each lang's dep-name list through
+// depToFramework. Deduped + sorted so the output is stable for
+// golden tests.
+func inferFrameworks(deps map[string][]string) []string {
+	seen := map[string]struct{}{}
+	for _, names := range deps {
+		for _, n := range names {
+			if fw, ok := depToFramework[strings.ToLower(n)]; ok {
+				seen[fw] = struct{}{}
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// cargoDepSection matches section headers we treat as cargo deps
+// sources. Target-specific deps (``[target.'cfg(unix)'.dependencies]``)
+// are included too — their presence is just as informative for G11.
+var cargoDepSection = regexp.MustCompile(`^\s*\[(?:dependencies|dev-dependencies|build-dependencies|target\..+\.dependencies|workspace\.dependencies)\]\s*$`)
+var cargoDepLine = regexp.MustCompile(`^\s*([A-Za-z0-9_][A-Za-z0-9_-]*)\s*=`)
+var tomlSectionHeader = regexp.MustCompile(`^\s*\[[^]]+\]\s*$`)
+
+// readCargoDeps collects dep NAMES from a Cargo.toml. Returns an
+// empty slice when the file is missing or unparseable.
+func readCargoDeps(target string) []string {
+	body, err := os.ReadFile(filepath.Join(target, "Cargo.toml"))
+	if err != nil {
+		return []string{}
+	}
+	out := []string{}
+	seen := map[string]struct{}{}
+	inSection := false
+	for _, line := range strings.Split(string(body), "\n") {
+		if tomlSectionHeader.MatchString(line) {
+			inSection = cargoDepSection.MatchString(line)
+			continue
+		}
+		if !inSection {
+			continue
+		}
+		if m := cargoDepLine.FindStringSubmatch(line); m != nil {
+			name := m[1]
+			if _, dup := seen[name]; !dup {
+				seen[name] = struct{}{}
+				out = append(out, name)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// readNpmDeps collects dep NAMES from package.json (dependencies,
+// devDependencies, peerDependencies, optionalDependencies).
+func readNpmDeps(target string) []string {
+	body, err := os.ReadFile(filepath.Join(target, "package.json"))
+	if err != nil {
+		return []string{}
+	}
+	var pkg struct {
+		Dependencies         map[string]any `json:"dependencies"`
+		DevDependencies      map[string]any `json:"devDependencies"`
+		PeerDependencies     map[string]any `json:"peerDependencies"`
+		OptionalDependencies map[string]any `json:"optionalDependencies"`
+	}
+	if err := json.Unmarshal(body, &pkg); err != nil {
+		return []string{}
+	}
+	seen := map[string]struct{}{}
+	for _, m := range []map[string]any{pkg.Dependencies, pkg.DevDependencies, pkg.PeerDependencies, pkg.OptionalDependencies} {
+		for k := range m {
+			seen[k] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// pyDepString extracts the leading package name from a PEP 508
+// requirement string: ``django>=4.2; python_version>='3.9'`` → ``django``.
+// Accepts ``name[extra]`` and strips the extras bracket.
+var pyDepRe = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_.-]*)`)
+
+func parsePyDep(s string) string {
+	if m := pyDepRe.FindStringSubmatch(s); m != nil {
+		return strings.ToLower(m[1])
+	}
+	return ""
+}
+
+// stripTomlComment removes a trailing ``# ...`` comment from a TOML
+// line. The naive ``strings.Index("#")`` is wrong because ``#`` can
+// appear inside a string value (``tag = "#anchor"``). We walk the
+// line, toggle an in-string flag on matching quotes, and cut at the
+// first unquoted ``#``.
+//
+// Why it matters for fingerprint: PEP 621 ``dependencies = [...]``
+// arrays may include comment lines that contain ``[...]`` (e.g. the
+// gitoma pyproject notes ``# ...the ``[all]`` extra was dropped``).
+// Without stripping, the ``]`` inside the comment is treated as the
+// end of the deps array and we lose half the deps.
+func stripTomlComment(line string) string {
+	inStr := false
+	var q byte
+	b := []byte(line)
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if inStr {
+			if c == q {
+				inStr = false
+			}
+			continue
+		}
+		if c == '"' || c == '\'' {
+			inStr = true
+			q = c
+			continue
+		}
+		if c == '#' {
+			return string(b[:i])
+		}
+	}
+	return line
+}
+
+// readPyprojectDeps handles three shapes:
+//
+//   1. PEP 621 modern: ``[project]`` → ``dependencies = ["django>=4"]``
+//      + ``[project.optional-dependencies]`` tables.
+//   2. Poetry: ``[tool.poetry.dependencies]`` → ``django = "^4"``.
+//   3. requirements.txt fallback when pyproject.toml absent.
+//
+// Returns deduped + sorted list.
+func readPyprojectDeps(target string) []string {
+	seen := map[string]struct{}{}
+	add := func(name string) {
+		if name != "" && name != "python" {
+			seen[name] = struct{}{}
+		}
+	}
+	// addItem normalises a single split fragment from a deps array:
+	// trims whitespace + surrounding quotes, strips the PEP 508 ``[extra]``
+	// suffix, then runs parsePyDep on what's left.
+	addItem := func(raw string) {
+		s := strings.Trim(strings.TrimSpace(raw), `"'`)
+		if s == "" {
+			return
+		}
+		if br := strings.Index(s, "["); br >= 0 {
+			s = s[:br]
+		}
+		add(parsePyDep(s))
+	}
+	// findArrayCloseBalanced returns the index in ``s`` where the
+	// running bracket balance (starting at ``startDepth``) reaches 0
+	// from a ``]``. Returns -1 if the array does not close inside ``s``.
+	// Used to slice exactly the ``[…]`` content of an inline deps array
+	// without falling for nested ``[extra]`` markers in dep VALUES like
+	// ``"mcp[cli]>=1.0"``.
+	findArrayCloseBalanced := func(s string, startDepth int) int {
+		depth := startDepth
+		for i, c := range s {
+			if c == '[' {
+				depth++
+			} else if c == ']' {
+				depth--
+				if depth == 0 {
+					return i
+				}
+			}
+		}
+		return -1
+	}
+	if body, err := os.ReadFile(filepath.Join(target, "pyproject.toml")); err == nil {
+		lines := strings.Split(string(body), "\n")
+		// Modes: "" (none), "project.deps" (array in progress), "poetry.deps" (table)
+		mode := ""
+		inOptDeps := false
+		// Bracket-depth tracker for the in-progress ``project.deps`` array.
+		// Required because dep VALUES like ``"mcp[cli]>=1.0"`` contain ``]``
+		// inside the string — a naive ``Contains(line, "]")`` would close
+		// the array half-way through and lose every dep after it.
+		depth := 0
+		for _, raw := range lines {
+			// Strip TOML comments BEFORE any parsing — ``]`` or ``[`` inside
+			// a comment must never drive mode transitions. Section header
+			// detection also runs on the stripped form so a trailing
+			// ``[section] # with [brackets]`` still matches.
+			line := stripTomlComment(raw)
+			trim := strings.TrimSpace(line)
+			// Section transitions.
+			if tomlSectionHeader.MatchString(line) {
+				hdr := strings.TrimSpace(trim)
+				mode = ""
+				inOptDeps = false
+				depth = 0
+				switch {
+				case hdr == "[tool.poetry.dependencies]" || hdr == "[tool.poetry.dev-dependencies]" || strings.HasPrefix(hdr, "[tool.poetry.group.") && strings.HasSuffix(hdr, ".dependencies]"):
+					mode = "poetry.deps"
+				case hdr == "[project]":
+					mode = "project"
+				case hdr == "[project.optional-dependencies]":
+					inOptDeps = true
+				}
+				continue
+			}
+			// Shape 1: PEP 621 [project] dependencies array.
+			if mode == "project" && strings.HasPrefix(trim, "dependencies") {
+				if idx := strings.Index(line, "["); idx >= 0 {
+					mode = "project.deps"
+					depth = 1
+					rest := line[idx+1:]
+					content := rest
+					if end := findArrayCloseBalanced(rest, depth); end >= 0 {
+						// inline array — slice exactly the array body.
+						content = rest[:end]
+						depth = 0
+					} else {
+						depth += strings.Count(rest, "[") - strings.Count(rest, "]")
+					}
+					for _, item := range strings.Split(content, ",") {
+						addItem(item)
+					}
+					if depth <= 0 {
+						mode = "project"
+						depth = 0
+					}
+				}
+				continue
+			}
+			if mode == "project.deps" {
+				content := line
+				if end := findArrayCloseBalanced(line, depth); end >= 0 {
+					content = line[:end]
+					depth = 0
+				} else {
+					depth += strings.Count(line, "[") - strings.Count(line, "]")
+				}
+				for _, item := range strings.Split(content, ",") {
+					addItem(item)
+				}
+				if depth <= 0 {
+					mode = "project"
+					depth = 0
+				}
+				continue
+			}
+			// Shape: [project.optional-dependencies] → one array per extra.
+			if inOptDeps {
+				// inline arrays only (multi-line is rare in this section).
+				if idx := strings.Index(line, "["); idx >= 0 {
+					rest := line[idx+1:]
+					if end := findArrayCloseBalanced(rest, 1); end >= 0 {
+						for _, item := range strings.Split(rest[:end], ",") {
+							addItem(item)
+						}
+					}
+				}
+				continue
+			}
+			// Shape 2: Poetry deps table — ``name = "^1.0"`` or ``name = {...}``.
+			if mode == "poetry.deps" {
+				if m := cargoDepLine.FindStringSubmatch(line); m != nil {
+					add(strings.ToLower(m[1]))
+				}
+				continue
+			}
+		}
+	} else {
+		// Fallback: requirements.txt
+		for _, fname := range []string{"requirements.txt", "requirements-dev.txt"} {
+			if body, err := os.ReadFile(filepath.Join(target, fname)); err == nil {
+				for _, line := range strings.Split(string(body), "\n") {
+					trim := strings.TrimSpace(line)
+					if trim == "" || strings.HasPrefix(trim, "#") || strings.HasPrefix(trim, "-") {
+						continue
+					}
+					add(parsePyDep(trim))
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// readGoModDeps collects module paths from go.mod require blocks.
+// Handles both ``require x v1`` and multi-line ``require (\n x v1\n)``.
+var goModLine = regexp.MustCompile(`^\s*([a-zA-Z0-9_./-]+(?:\.[a-zA-Z0-9_./-]+)+)\s+v`)
+
+func readGoModDeps(target string) []string {
+	body, err := os.ReadFile(filepath.Join(target, "go.mod"))
+	if err != nil {
+		return []string{}
+	}
+	seen := map[string]struct{}{}
+	inBlock := false
+	for _, raw := range strings.Split(string(body), "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "//") || line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "require (") {
+			inBlock = true
+			continue
+		}
+		if inBlock {
+			if line == ")" {
+				inBlock = false
+				continue
+			}
+			if m := goModLine.FindStringSubmatch(raw); m != nil {
+				seen[m[1]] = struct{}{}
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "require ") {
+			rest := strings.TrimPrefix(line, "require ")
+			if m := goModLine.FindStringSubmatch(" " + rest); m != nil {
+				seen[m[1]] = struct{}{}
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// detectEntrypoints returns well-known program entry files that
+// actually exist. Keeps the set small + language-canonical so doc
+// grounding can answer "is this a CLI or a server?".
+func detectEntrypoints(target string) []string {
+	candidates := []string{
+		"src/main.rs",
+		"main.go",
+		"cmd/main.go",
+		"src/main.ts",
+		"src/index.ts",
+		"src/index.js",
+		"src/app.ts",
+		"src/app.js",
+		"main.py",
+		"__main__.py",
+		"manage.py",
+		"wsgi.py",
+		"asgi.py",
+		"app.py",
+	}
+	out := []string{}
+	for _, c := range candidates {
+		if _, err := os.Stat(filepath.Join(target, c)); err == nil {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// detectManifests returns the subset of well-known manifests that
+// exist in the repo root. Helps G11 skip ground-truth claims for
+// manifests we didn't see (e.g. doc cites ``package.json`` but there
+// isn't one).
+func detectManifests(target string) []string {
+	candidates := []string{
+		"Cargo.toml",
+		"package.json",
+		"pyproject.toml",
+		"requirements.txt",
+		"go.mod",
+		"Gemfile",
+		"composer.json",
+		"pom.xml",
+		"build.gradle",
+		"build.gradle.kts",
+		"Dockerfile",
+		"Makefile",
+	}
+	out := []string{}
+	for _, c := range candidates {
+		if _, err := os.Stat(filepath.Join(target, c)); err == nil {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// fingerprintLanguages aggregates tracked files by extension to
+// their canonical language name. Lighter-weight than the churn+
+// stable computation in /repo/context — fingerprint just needs
+// "what languages does this repo contain".
+func fingerprintLanguages(ctx context.Context, target string) []map[string]any {
+	out, err := gitRun(ctx, target, "ls-files", "-z")
+	if err != nil {
+		return []map[string]any{}
+	}
+	agg := map[string]int64{}
+	for _, name := range bytes.Split(out, []byte{0}) {
+		if len(name) == 0 {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(string(name)))
+		if ext == "" {
+			continue
+		}
+		lang := extensionLanguage[ext]
+		if lang == "" {
+			lang = strings.TrimPrefix(ext, ".")
+		}
+		agg[lang]++
+	}
+	langs := make([]map[string]any, 0, len(agg))
+	for k, v := range agg {
+		langs = append(langs, map[string]any{"name": k, "files": v})
+	}
+	sort.Slice(langs, func(i, j int) bool {
+		fi, _ := langs[i]["files"].(int64)
+		fj, _ := langs[j]["files"].(int64)
+		if fi != fj {
+			return fi > fj
+		}
+		return langs[i]["name"].(string) < langs[j]["name"].(string)
+	})
+	return langs
+}
+
+func handleRepoFingerprint(w http.ResponseWriter, r *http.Request) {
+	target := requireTargetRepo(w, r)
+	if target == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	commitSha := ""
+	if out, err := gitRun(ctx, target, "rev-parse", "HEAD"); err == nil {
+		commitSha = strings.TrimSpace(string(out))
+	}
+
+	deps := map[string][]string{
+		"rust":   readCargoDeps(target),
+		"npm":    readNpmDeps(target),
+		"python": readPyprojectDeps(target),
+		"go":     readGoModDeps(target),
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"target":              target,
+		"commit_sha":          commitSha,
+		"computed_at":         time.Now().UTC().Format(time.RFC3339),
+		"languages":           fingerprintLanguages(ctx, target),
+		"stack":               detectStack(target),
+		"declared_deps":       deps,
+		"declared_frameworks": inferFrameworks(deps),
+		"entrypoints":         detectEntrypoints(target),
+		"manifest_files":      detectManifests(target),
 	})
 }
 

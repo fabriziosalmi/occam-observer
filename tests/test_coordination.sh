@@ -85,6 +85,65 @@ else
     fail "T1 langs=$langs stack=$stack"
 fi
 
+# ── T1b: /repo/fingerprint ────────────────────────────────────────────────────
+# Stable "what is this repo" snapshot — declared deps, frameworks, langs.
+# Fixture pyproject is poetry-style with no real deps, so we focus on the
+# always-present fields: commit_sha, languages, stack, manifests.
+body="$(curl -sf "${BASE}/repo/fingerprint?target=${repo}")"
+sha="$(echo "$body" | jq -r '.commit_sha')"
+nlangs="$(echo "$body" | jq -r '.languages | length')"
+stack_has_py="$(echo "$body" | jq '[.stack[] | select(. == "python")] | length')"
+manifests="$(echo "$body" | jq -r '.manifest_files | join(",")')"
+if [[ "$sha" =~ ^[0-9a-f]{40}$ ]] && [ "${nlangs:-0}" -ge 1 ] && [[ "$manifests" == *"pyproject.toml"* ]]; then
+    pass "T1b /repo/fingerprint: sha=${sha:0:8} ${nlangs} lang(s) manifests=${manifests}"
+else
+    fail "T1b sha=$sha langs=$nlangs stack_py=$stack_has_py manifests=$manifests"
+fi
+
+# Same HEAD → same commit_sha (time-invariant property)
+sha2="$(curl -sf "${BASE}/repo/fingerprint?target=${repo}" | jq -r '.commit_sha')"
+if [ "$sha" = "$sha2" ]; then pass "T1b' commit_sha is stable across calls"
+else fail "T1b' sha=$sha sha2=$sha2"; fi
+
+# Targeted dep-parse fixture — covers the two regression cases that bit us
+# during fingerprint dev: ``mcp[cli]`` (extras inside a dep value) and a
+# comment line containing ``[brackets]`` mid-array.
+fp_repo="$(mktemp -d /tmp/occam_fp_repo_XXXXXX)"
+git -C "$fp_repo" init -q
+git -C "$fp_repo" config user.email a@b.c
+git -C "$fp_repo" config user.name fp
+cat > "$fp_repo/pyproject.toml" <<'TOML'
+[project]
+name = "fpdemo"
+version = "0.1.0"
+dependencies = [
+    # comment with ``[brackets]`` inside — must NOT terminate the array
+    "fastapi>=0.100",
+    "mcp[cli]>=1.0",
+    "django>=4.2",
+]
+TOML
+git -C "$fp_repo" add . && git -C "$fp_repo" commit -q -m fp
+body="$(curl -sf "${BASE}/repo/fingerprint?target=${fp_repo}")"
+deps="$(echo "$body" | jq -r '.declared_deps.python | join(",")')"
+fws="$(echo "$body" | jq -r '.declared_frameworks | join(",")')"
+if [[ "$deps" == *"fastapi"* ]] && [[ "$deps" == *"mcp"* ]] && [[ "$deps" == *"django"* ]]; then
+    pass "T1b'' parses past ``mcp[cli]`` + comment with [brackets]: deps=$deps"
+else
+    fail "T1b'' deps=$deps"
+fi
+if [[ "$fws" == *"fastapi"* ]] && [[ "$fws" == *"django"* ]]; then
+    pass "T1b''' frameworks inferred from deps: $fws"
+else
+    fail "T1b''' fws=$fws"
+fi
+rm -rf "$fp_repo"
+
+# Non-git target → 400 (defense in depth)
+code="$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/repo/fingerprint?target=/tmp")"
+if [ "$code" = "400" ]; then pass "T1b'''' non-git target → 400"
+else fail "T1b'''' code=$code"; fi
+
 # ── T2: /repo/blame/<path> ────────────────────────────────────────────────────
 body="$(curl -sf "${BASE}/repo/blame/src.py?target=${repo}")"
 rows="$(echo "$body" | jq -r 'length')"
