@@ -23,46 +23,64 @@ carries an `X-Trace-Id` correlated across the gateway and the bash engine
 logs.
 
 ```
-         ┌─────────────────────────┐
-         │ telemetry_observer.sh   │   bash engine: metrics, severity,
-         │ (bash + awk + git)      │   blame, analyzer orchestration
-         └──┬────────────────┬─────┘
-            │                │
-            │ write-through  │ append
-            ▼                ▼
-    /tmp/occam_state.json   ~/.local/share/occam-observer/snapshots.db
-            ▲                ▲
-            │                │
-         ┌──┴────────────────┴─────┐       ┌────────────────────────┐
-         │ api/main.go             │       │ mcp/main.go            │
-         │ Go HTTP gateway         │       │ stdio JSON-RPC 2.0     │
-         │ 127.0.0.1:9999          │       │ MCP 2024-11-05         │
-         │ /,/analyze,/trend,      │       │ occam_analyze, check,  │
-         │ /healthz,/readyz,       │       │ trend, validate_config │
-         │ /metrics                │       │ health                 │
-         └──────────┬──────────────┘       └───────────┬────────────┘
-                    │                                  │
-                    ▼                                  ▼
-          curl · React UI                   Claude · Cursor · VS Code
-                                            Windsurf · Zed · Continue
+    ┌────────────┐           ┌──────────────────────────────┐
+    │  ./occam   │──spawns──▶│ telemetry_observer.sh --watch │  bash engine,
+    │  CLI       │──spawns─┐ │ (headless, fswatch/inotify)   │  debounced fs
+    │  wrapper   │         │ └──────────────┬───────────────┘  watcher
+    └──────┬─────┘         │                │
+           │               │                ▼  write-through + persist
+           │               │    /tmp/occam_state.json
+           │               │    $XDG_DATA_HOME/occam-observer/snapshots.db
+           │               │                ▲                ▲
+           │               ▼                │                │
+           │       ┌────────────────────────┴───────────┐    │
+           │       │  api/  (Go HTTP gateway)           │    │
+           │       │  127.0.0.1:9999                    │    │
+           │       │  /  /analyze  /trend               │    │
+           │       │  /healthz /readyz /metrics         │    │
+           │       │  /repo/* /file/* /symbol           │    │
+           │       │  /claim  /observation  /diff       │    │
+           │       │  /agent/identity/:commit  /contract│    │
+           │       │  /ui/*  (React dashboard)          │    │
+           │       └────────────┬───────────────────────┘    │
+           │                    ▲                            │
+           └────────────────────┘                            │
+                                                             │
+              ┌──────────────────────────────────────────────┤
+              │                                              │
+              ▼                                              ▼
+      curl · React UI                          ┌──────────────────────────┐
+                                               │  mcp/  (stdio JSON-RPC)  │
+                                               │  MCP 2024-11-05          │
+                                               │  20 tools, HTTP-proxied  │
+                                               └────────────┬─────────────┘
+                                                            │
+                                                            ▼
+                                                Claude Desktop · Cursor ·
+                                                Windsurf · VS Code · Zed ·
+                                                Continue
 ```
 
 ## Requirements
 
-| Purpose          | Tool                       | Install                                  |
-|------------------|----------------------------|------------------------------------------|
-| Engine           | `bash` ≥ 3.2, `git` ≥ 2.x  | preinstalled                             |
-| JSON handling    | `jq`                       | `brew install jq` / `apt install jq`     |
-| File watch (TUI) | `fswatch` (macOS)          | `brew install fswatch`                   |
-|                  | `inotifywait` (Linux)      | `apt install inotify-tools`              |
-| HTTP gateway     | `go` ≥ 1.21                | `brew install go`                        |
-| TSDB (optional)  | `sqlite3`                  | preinstalled on macOS / `apt install sqlite3` |
-| Analyzer: AST    | `python3` ≥ 3.8            | preinstalled                             |
-| Analyzer: rules  | `semgrep` (optional)       | `pip install semgrep`                    |
+| Purpose              | Tool                       | Install                                  |
+|----------------------|----------------------------|------------------------------------------|
+| Engine               | `bash` ≥ 3.2, `git` ≥ 2.x  | preinstalled                             |
+| JSON handling        | `jq`                       | `brew install jq` · `apt install jq`     |
+| File-system watcher  | `fswatch` (macOS)          | `brew install fswatch`                   |
+|                      | `inotifywait` (Linux)      | `apt install inotify-tools`              |
+| HTTP + MCP binaries  | `go` ≥ 1.21                | `brew install go`                        |
+| TSDB + coordination  | `sqlite3`                  | preinstalled on macOS · `apt install sqlite3` |
+| Analyzer: AST        | `python3` ≥ 3.8            | preinstalled                             |
+| Analyzer: rules      | `semgrep` (optional)       | `pip install semgrep`                    |
+| Dashboard dev / build| `node` ≥ 20 + `npm`        | `brew install node`                      |
 
 All optional dependencies degrade gracefully — missing `sqlite3` disables
-persistence, missing `semgrep` makes that analyzer a no-op, missing `fswatch`
-only affects the TUI watcher (`--json`/`--check` still work).
+persistence and the coordination state (`/trend`, `/observation`, `/claim`);
+missing `semgrep` makes that analyzer a no-op; missing `fswatch`/`inotifywait`
+only affects the interactive TUI and the headless `--watch` mode (the
+`--json`/`--check` one-shot paths still work). `./occam doctor` prints a
+complete dependency probe.
 
 ## Install
 
@@ -195,10 +213,11 @@ schema and query parameters.
 ## MCP (for AI agents)
 
 ```bash
-cd mcp && go build -o ../occam-mcp .
+./occam mcp                        # prints ready-to-paste config for your client
 ```
 
-Register the binary with your client. Example (Claude Desktop — macOS:
+The first invocation also builds `occam-mcp` if it's not there yet.
+Example of the generated config (Claude Desktop — macOS:
 `~/Library/Application Support/Claude/claude_desktop_config.json`):
 
 ```json
@@ -207,12 +226,19 @@ Register the binary with your client. Example (Claude Desktop — macOS:
     "occam": {
       "command": "/abs/path/to/occam-mcp",
       "env": {
-        "ENGINE_SCRIPT": "/abs/path/to/telemetry_observer.sh"
+        "ENGINE_SCRIPT": "/abs/path/to/telemetry_observer.sh",
+        "OCCAM_API_URL": "http://127.0.0.1:9999",
+        "OCCAM_DB":      "/abs/path/to/snapshots.db"
       }
     }
   }
 }
 ```
+
+`OCCAM_API_URL` is the gateway address the MCP server HTTP-proxies to for
+the 15 coordination tools. The five core tools (`occam_analyze`,
+`occam_check`, `occam_trend`, `occam_validate_config`, `occam_health`) work
+without a running gateway — they spawn the bash engine directly.
 
 Tools exposed:
 
@@ -358,15 +384,26 @@ Mount a volume at `/var/lib/occam` to keep the TSDB across container restarts.
 ## Tests
 
 ```bash
-./run_tests.sh
+./occam test          # or: ./run_tests.sh
 ```
 
-Runs every `tests/*.sh` suite plus `test_json.sh` (pathological JSON escape
-coverage), `go vet`, `bash -n`, and `--validate` against the shipped config.
+Runs every `tests/*.sh` suite (JSON escaping, analyzers, check-CLI,
+coordination, MCP, self-observability, TSDB trend, CLI wrapper), plus
+`go vet` on `api/` and `mcp/`, `bash -n` on the engine, and
+`--validate` on the shipped `config/main.yml`. The test runner exits
+non-zero on any failure; CI runs the same on every push and PR.
 
 ## Documentation
 
-Full docs in [`docs/`](docs/) (VitePress):
+VitePress site, auto-deployed to GitHub Pages on every push to `main`
+via [`.github/workflows/deploy-docs.yml`](.github/workflows/deploy-docs.yml):
+
+- Live: https://fabriziosalmi.github.io/occam-observer/
+- Source: [`docs/`](docs/)
+- Pages: Getting Started · Architecture · State Vectors · Semantic Mappings
+  · MCP · Coordination API · REST API · Walkthrough
+
+Run locally while editing:
 
 ```bash
 cd docs && npm ci && npm run docs:dev
@@ -374,21 +411,26 @@ cd docs && npm ci && npm run docs:dev
 
 ## Environment variables
 
-| Variable                | Default                                   | Purpose                                       |
+| Variable                | Default                                   | Used by                                       |
 |-------------------------|-------------------------------------------|-----------------------------------------------|
-| `API_PORT`              | `9999`                                    | Go gateway listen port                        |
+| `OCCAM_PORT`            | `9999`                                    | `./occam` CLI — gateway listen port           |
+| `API_PORT`              | `9999`                                    | raw `api/main.go` binary — gateway listen port|
+| `OCCAM_API_URL`         | `http://127.0.0.1:9999`                   | MCP server — coordination-tool HTTP target    |
 | `CACHE_FILE`            | `/tmp/occam_state.json`                   | write-through JSON cache path                 |
-| `ENGINE_SCRIPT`         | (resolved from api/)                      | absolute path to `telemetry_observer.sh`      |
+| `ENGINE_SCRIPT`         | (auto-resolved)                           | absolute path to `telemetry_observer.sh`      |
 | `OCCAM_DATA_DIR`        | `$XDG_DATA_HOME/occam-observer`           | TSDB directory                                |
 | `OCCAM_DB`              | `$OCCAM_DATA_DIR/snapshots.db`            | TSDB file path                                |
 | `OCCAM_NO_PERSIST`      | `0`                                        | `1` disables SQLite writes                    |
-| `OCCAM_NO_ANALYZERS`    | `0`                                        | `1` disables analyzers/*                      |
+| `OCCAM_NO_ANALYZERS`    | `0`                                        | `1` disables everything in `analyzers/`       |
 | `OCCAM_ANALYZER_TIMEOUT`| `30`                                       | analyzer wall-clock limit (seconds)           |
 | `OCCAM_SEMGREP_CONFIG`  | `auto`                                    | `-c` arg passed to Semgrep                    |
-| `OCCAM_DEBOUNCE_MS`     | `400`                                     | watcher event coalescing window               |
+| `OCCAM_DEBOUNCE_MS`     | `400`                                     | watcher event coalescing window (ms)          |
 | `OCCAM_LOG`             | `info`                                    | `quiet` silences structured stderr logs       |
 | `OCCAM_HOOK_FAIL_ON`    | —                                          | turns the pre-commit hook into a blocking gate|
-| `OCCAM_TRACE_ID`        | (propagated by Go gateway)                | correlation id for cross-process logs         |
+| `OCCAM_TRACE_ID`        | (set by gateway middleware)               | correlation id for cross-process logs         |
+| `XDG_RUNTIME_DIR`       | `/tmp` (fallback)                         | where pid files + log + target marker live    |
+| `XDG_DATA_HOME`         | `$HOME/.local/share`                      | TSDB parent directory                         |
+| `NO_COLOR`              | `0`                                        | `1` disables ANSI color in `./occam` output   |
 
 ## Exit codes
 
@@ -406,61 +448,102 @@ cd docs && npm ci && npm run docs:dev
 The "observer grew a nervous system" release. Occam went from a single-file
 bash telemetry TUI to a full agent-facing platform.
 
-**Engine**
+**Engine (`telemetry_observer.sh`)**
 - RFC 8259 JSON escape; `--check --fail-on=LEVEL` gate mode with exit codes
-- `--diff=head|staged|working`; `--validate` against `config/schema.json`
-- `violations[]` with per-line git-blame provenance; pluggable analyzer
-  protocol (`analyzers/*` — stdin=diff, stdout=findings)
+  0/1/2/3 for pipelines and pre-commit hooks
+- `--diff=head|staged|working`; `--staged` / `--working` shorthands
+- `--watch` headless filesystem watcher — re-analyzes on every save and
+  keeps the dashboard live without taking over the terminal
+- `--validate` enforces the constraints in `config/schema.json`
+- `violations[]` with per-line git-blame provenance (distinguishes
+  uncommitted from pre-existing issues)
+- Pluggable analyzer protocol (`analyzers/*` — stdin = unified diff,
+  stdout = findings JSON, 30 s timeout)
 - Reference analyzers: Semgrep adapter, Python AST POC
-  (eval/exec/pickle/shell=True/cyclomatic)
-- Severity ladder (none → critical) escalated by analyzer findings
-- Structured JSON logs with `trace_id` propagation
+  (`eval`/`exec`/`subprocess(shell=True)`/`pickle.load`/cyclomatic)
+- Severity ladder (none → critical) escalated by analyzer findings;
+  reasons surfaced as machine-parseable tokens
+- Structured JSON logs on stderr with `trace_id` propagation
 - Cache file atomically created at mode 0600 (no TOCTOU window)
+- Symlink-escape guard on the syntax-check loop
 
-**Gateway (api/main.go)**
-- `/trend` over SQLite WAL TSDB
-- `/healthz`, `/readyz`, `/metrics` (Prometheus text)
-- `X-Trace-Id` middleware, request log, 30 s analyze timeout
-- Background goroutine refreshes gauges (no sqlite3 fork per scrape)
-- All data endpoints now same-origin only (removed `CORS *`)
+**Gateway (`api/`)**
+- `/trend` over SQLite WAL TSDB; `/healthz`, `/readyz`, `/metrics`
+  (Prometheus text exposition)
+- `X-Trace-Id` middleware: caller-supplied header echoed back,
+  generated otherwise, and forwarded as `OCCAM_TRACE_ID` to the engine
+- Background goroutine refreshes the snapshot-count gauge (no sqlite3
+  fork per scrape, nudged on each `/analyze` to stay fresh)
+- `stdout` and `stderr` separated on engine exec (log lines never
+  contaminate the JSON body)
+- Per-request timeout 30 s; server-level `ReadHeaderTimeout: 5s`
+- CORS `*` removed from data endpoints — localhost, same-origin only
 
-**MCP server (mcp/)**
-- Standalone Go binary `occam-mcp`, stdio JSON-RPC 2.0, protocol
-  `2024-11-05`. Compatible with Claude Desktop, Cursor, Windsurf, VS Code /
-  Copilot Chat, Zed, Continue. 20 tools total; per-client setup snippets in
-  [docs/guide/mcp.md](docs/guide/mcp.md).
-
-**Coordination API (for multi-agent systems)**
-- 13 ready endpoints + 6 documented 501 stubs for repo context, blame,
-  churn, diff, file imports/exports/fingerprint, symbol lookup,
-  agent-identity, observations log, file-level claims, contract.
-- New SQLite tables `observations` + `claims` (WAL, auto-GC on expire).
+**Coordination API (multi-agent)** — 19 endpoints total
+- 13 ready endpoints: `/repo/context`, `/repo/blame/:path`,
+  `/repo/churn/:path`, `/repo/agent-log`, `/diff`, `/file/fingerprint`,
+  `/file/imports`, `/file/exports`, `/symbol`, `/agent/identity/:commit`,
+  `/contract`, `POST /observation`, `POST|GET|DELETE /claim`
+- 6 documented 501 stubs with machine-readable reasons
+  (`/repo/test-map`, `/repo/failing-tests`, `/file/frozen-regions`,
+  `/file/last-safe`, `/run/:id/tests/delta`, `/scorecard/:run_id`)
+- New SQLite tables: `observations`, `claims` (WAL, lazy GC on expire)
 - Python symbol indexer (`analyzers/python-symbol-index.py`) backing
-  `/symbol`, `/file/imports`, `/file/exports`, ast_hash.
-- See [docs/guide/coordination-api.md](docs/guide/coordination-api.md) for
-  the normative contract and [docs/guide/walkthrough.md](docs/guide/walkthrough.md)
-  for a real end-to-end API trace.
+  `/symbol`, `/file/imports`, `/file/exports`, and the `ast_hash` field
+- Full contract in [docs/guide/coordination-api.md](docs/guide/coordination-api.md);
+  real end-to-end API trace in [docs/guide/walkthrough.md](docs/guide/walkthrough.md)
 
-**Dashboard (web/src/App.tsx)**
-- Full Typescript type definitions (no `any`)
-- Error UI, AbortController, `visibilitychange` pause, a11y (aria-live,
-  role=meter, sr-only labels, motion-reduce)
-- Shows new fields: `trace_id`, `diff_mode`, `check.level` ribbon,
-  violations with blame, analyzer findings, perf footer
+**MCP server (`mcp/`)**
+- Standalone Go binary `occam-mcp`, CGO-free, stdio JSON-RPC 2.0,
+  protocol `2024-11-05`
+- Compatible with Claude Desktop, Cursor, Windsurf, VS Code / Copilot Chat,
+  Zed, Continue
+- 20 tools: 5 core spawn the engine directly, 15 coordination tools
+  HTTP-proxy to the gateway via a single `httpToolRoutes` dispatcher
+- Stdin frame cap 512 KiB; per-call wall-clock timeouts
+- `./occam mcp` prints the ready-to-paste client config with absolute
+  paths pre-filled; per-client snippets in [docs/guide/mcp.md](docs/guide/mcp.md)
+
+**Dashboard (`web/src/App.tsx`)**
+- Full TypeScript types (`Telemetry`, `Metrics`, `Violation`, `AnalyzerReport`)
+- `AbortController` polling paused on `visibilitychange`; error banner
+  on fetch failure; empty state that respects `is_idle` semantics
+- Accessibility: `aria-live`, `role="meter"`, `role="alert"`, `sr-only`
+  label, `aria-busy`, `motion-reduce`
+- New sections: check-level ribbon with reasons, violations with blame,
+  per-analyzer findings, performance footer, relative timestamp
+
+**Convenience CLI (`./occam`)**
+- Single entry point for daily use: `start`, `start [PATH]` (+ watcher),
+  `stop`, `status`, `restart`, `logs [-f]`, `analyze`, `check`, `ui`,
+  `ui-build`, `test`, `doctor`, `clean [--all]`, `mcp`, `version`, `help`
+- Pid + log under `$XDG_RUNTIME_DIR`; TSDB under `$XDG_DATA_HOME`
+- Respects `NO_COLOR`; override `OCCAM_PORT` / `OCCAM_DB`
 
 **DevEx**
-- `run_tests.sh` unified runner; 6 regression suites, 97 assertions
-- Dockerfile (API-only runtime)
-- `hooks/pre-commit` (advisory / gating via `OCCAM_HOOK_FAIL_ON=LEVEL`)
-- `.github/workflows/tests.yml` (bash -n, `go vet`, `--validate`, tests)
-- `scripts/build-ui.sh` for web → api/public static deploy
+- Unified `run_tests.sh` (invoked by `./occam test`) — 12 regression
+  suites, 90+ assertions, plus `go vet` (both modules), `bash -n`,
+  `--validate`. CI runs the lot on every push and PR
+- `Dockerfile` for API-only container deployments
+- `hooks/pre-commit` — advisory by default, gating via `OCCAM_HOOK_FAIL_ON`
+- `scripts/build-ui.sh` — `web/` → `api/public/` production build
+- `.github/workflows/tests.yml` and `deploy-docs.yml`
 
 **Docs**
-- README/docs rewrite — honest stack (bash + Go + Python + React)
-- `docs/guide/` pages: architecture, state-vectors, semantic-mappings,
-  mcp, coordination-api, walkthrough
-- Every hardcoded personal path scrubbed
-- VitePress sidebar repaired (previously pointed at nonexistent pages)
+- Full README and VitePress rewrite; honest stack (bash + Go + Python + React)
+- New guide pages: architecture, state-vectors, semantic-mappings, mcp,
+  coordination-api, walkthrough
+- Every hardcoded personal path scrubbed from the repository
+- VitePress sidebar repaired (previously linked to pages that did not exist)
+- Auto-deploy to GitHub Pages on push to `main`
+
+**Post-release patches on the v0.2.0 tag**
+- `is_idle` semantics were inverted at the engine boundary. The field
+  is named `is_idle` in the JSON but had been carrying `is_dirty` values,
+  so the Deep Intelligence panel appeared empty whenever a repository
+  actually had uncommitted changes. Corrected and pinned with a field note
+  in `docs/api/telemetry.md`.
+- Stale `api/public/` bundle from the v0.1.0 build was regenerated.
 
 ### v0.1.0 — 2026-04-23
 
