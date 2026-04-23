@@ -104,23 +104,35 @@ compute_severity() {
         if [ "$(sev_rank "$1")" -gt "$(sev_rank "$level")" ]; then level="$1"; fi
     }
 
-    # CRITICAL
+    # CRITICAL — these never overlap with lower bands for the same metric.
     if [ "$sec"    -gt 0 ]; then _promote critical; _add_reason "security_violations=$sec"; fi
     if [ "$synbad" -gt 0 ]; then _promote critical; _add_reason "syntax_invalid_files_present"; fi
 
-    # HIGH
-    if [ "$ins"    -gt "$THRESHOLD_MASS_CRITICAL" ];    then _promote high; _add_reason "mass=$ins>${THRESHOLD_MASS_CRITICAL}"; fi
-    if [ "$comp"   -gt "$THRESHOLD_ENTROPY_CRITICAL" ]; then _promote high; _add_reason "entropy=$comp>${THRESHOLD_ENTROPY_CRITICAL}"; fi
+    # HIGH / MEDIUM bands for mass and entropy are mutually exclusive so
+    # a single metric contributes exactly one reason; the overall level is
+    # still the max via _promote. Without the `-le CRITICAL` guard, a mass
+    # of 500 would emit both "mass=500>300" and "mass=500>150".
+    if [ "$ins" -gt "$THRESHOLD_MASS_CRITICAL" ]; then
+        _promote high; _add_reason "mass=$ins>${THRESHOLD_MASS_CRITICAL}"
+    elif [ "$ins" -gt "$THRESHOLD_MASS_WARN" ]; then
+        _promote medium; _add_reason "mass=$ins>${THRESHOLD_MASS_WARN}"
+    fi
+    if [ "$comp" -gt "$THRESHOLD_ENTROPY_CRITICAL" ]; then
+        _promote high; _add_reason "entropy=$comp>${THRESHOLD_ENTROPY_CRITICAL}"
+    elif [ "$comp" -gt "$THRESHOLD_ENTROPY_WARN" ]; then
+        _promote medium; _add_reason "entropy=$comp>${THRESHOLD_ENTROPY_WARN}"
+    fi
+    # Categorical HIGH signals (presence flags, no band)
     if [ "$infra"  -gt 0 ]; then _promote high; _add_reason "infrastructure_changes_present"; fi
     if [ "$schema" -gt 0 ]; then _promote high; _add_reason "schema_mutations_present"; fi
 
-    # MEDIUM
-    if [ "$ins"  -gt "$THRESHOLD_MASS_WARN" ];    then _promote medium; _add_reason "mass=$ins>${THRESHOLD_MASS_WARN}"; fi
-    if [ "$comp" -gt "$THRESHOLD_ENTROPY_WARN" ]; then _promote medium; _add_reason "entropy=$comp>${THRESHOLD_ENTROPY_WARN}"; fi
-    if [ "$hygi" -ge 5 ]; then _promote medium; _add_reason "debt_issues=$hygi>=5"; fi
-
-    # LOW
-    if [ "$hygi" -gt 0 ]; then _promote low; _add_reason "debt_issues=$hygi"; fi
+    # Debt ladder: same exclusivity between medium (>=5) and low (<5 but >0).
+    if [ "$hygi" -ge 5 ]; then
+        _promote medium; _add_reason "debt_issues=$hygi>=5"
+    elif [ "$hygi" -gt 0 ]; then
+        _promote low;    _add_reason "debt_issues=$hygi"
+    fi
+    # LOW categorical
     if [ "$net"  -gt 0 ]; then _promote low; _add_reason "network_outbound_present"; fi
 
     printf '%s\n[%s]\n' "$level" "$reasons"
@@ -1350,11 +1362,13 @@ USAGE
     detect_os_watcher
     tui_init
 
-    # Popola il cache con stato IDLE iniziale — API risponde subito, senza 404
+    # Seed the cache with an idle snapshot so the gateway never 503s between
+    # startup and the first real render. is_idle=true matches the semantics
+    # (all zero metrics → nothing to show).
     local init_branch init_hash
     init_branch="$(git -C "$TARGET_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')"
     init_hash="$(  git -C "$TARGET_PATH" rev-parse --short HEAD         2>/dev/null || echo '0000000')"
-    write_cache "false" "$init_branch" "$init_hash" "$(date '+%Y-%m-%dT%H:%M:%S%z')" \
+    write_cache "true" "$init_branch" "$init_hash" "$(date '+%Y-%m-%dT%H:%M:%S%z')" \
         0 0 0 0 0 0 0 100 2>/dev/null || true
 
     # Avvia il server API in background prima del primo render

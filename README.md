@@ -388,10 +388,11 @@ Mount a volume at `/var/lib/occam` to keep the TSDB across container restarts.
 ```
 
 Runs every `tests/*.sh` suite (JSON escaping, analyzers, check-CLI,
-coordination, MCP, self-observability, TSDB trend, CLI wrapper), plus
-`go vet` on `api/` and `mcp/`, `bash -n` on the engine, and
-`--validate` on the shipped `config/main.yml`. The test runner exits
-non-zero on any failure; CI runs the same on every push and PR.
+coordination, MCP, self-observability, TSDB trend, CLI wrapper — 107
+assertions across the eight files), plus `go vet` on `api/` and `mcp/`,
+`bash -n` on the engine, and `--validate` on the shipped
+`config/main.yml`. The test runner exits non-zero on any failure; CI
+runs the same on every push and PR.
 
 ## Documentation
 
@@ -521,9 +522,11 @@ bash telemetry TUI to a full agent-facing platform.
 - Respects `NO_COLOR`; override `OCCAM_PORT` / `OCCAM_DB`
 
 **DevEx**
-- Unified `run_tests.sh` (invoked by `./occam test`) — 12 regression
-  suites, 90+ assertions, plus `go vet` (both modules), `bash -n`,
-  `--validate`. CI runs the lot on every push and PR
+- Unified `run_tests.sh` (invoked by `./occam test`) — 8 regression suites
+  with 107 assertions total (analyzers, check-CLI, CLI wrapper,
+  coordination, JSON escape, MCP, self-obs, trend), plus 4 meta-checks
+  (`go vet` on `api/` + `mcp/`, `bash -n`, and `--validate` on the shipped
+  config). CI runs the lot on every push and PR.
 - `Dockerfile` for API-only container deployments
 - `hooks/pre-commit` — advisory by default, gating via `OCCAM_HOOK_FAIL_ON`
 - `scripts/build-ui.sh` — `web/` → `api/public/` production build

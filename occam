@@ -107,6 +107,16 @@ cmd_start() {
         [ -d "$watch_target/.git" ] || die "watch target is not a git repo: $watch_target"
     fi
 
+    # Atomic start-lock via mkdir. Without it, two parallel `./occam start`
+    # invocations race between read_pid and writing the pid file: both spawn
+    # a gateway, the second gateway fails to bind (address in use) but the
+    # pid file ends up pointing at its dead pid, orphaning the first.
+    local lock_dir="${PID_FILE}.lockdir"
+    if ! mkdir "$lock_dir" 2>/dev/null; then
+        die "another ./occam start is in progress (lock at $lock_dir). If stale: rmdir that dir and retry."
+    fi
+    trap 'rmdir "$lock_dir" 2>/dev/null' RETURN
+
     if pid=$(read_pid); then
         ok "gateway already running (pid=$pid on port ${OCCAM_PORT})"
     else
