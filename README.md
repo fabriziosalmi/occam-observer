@@ -69,8 +69,31 @@ only affects the TUI watcher (`--json`/`--check` still work).
 ```bash
 git clone https://github.com/fabriziosalmi/occam-observer.git
 cd occam-observer
-chmod +x telemetry_observer.sh analyzers/*
+chmod +x telemetry_observer.sh analyzers/* occam
 ```
+
+## Quick-start — the `./occam` CLI
+
+One script drives everything. No flags to memorise.
+
+```bash
+./occam doctor        # probe deps + ports + config (first thing to run)
+./occam start         # build gateway if needed, spawn on 127.0.0.1:9999
+./occam status        # running? uptime? snapshot count?
+./occam analyze /abs/repo        # headless JSON telemetry
+./occam check   /abs/repo high   # gate: exit 1 if severity ≥ high
+./occam logs -f       # follow the gateway log
+./occam ui            # Vite dev server (hot reload) for the dashboard
+./occam ui-build      # static build → served at http://127.0.0.1:9999/ui/
+./occam test          # full regression suite
+./occam mcp           # MCP client configuration snippets
+./occam stop          # graceful stop
+./occam clean [--all] # wipe cache + log (add --all to wipe the TSDB)
+```
+
+Runtime state lives under `$XDG_RUNTIME_DIR` (falls back to `/tmp`); the
+TSDB lives under `$XDG_DATA_HOME/occam-observer/snapshots.db`. Override
+with `OCCAM_PORT`, `OCCAM_DB`, `NO_COLOR=1`.
 
 ## Usage
 

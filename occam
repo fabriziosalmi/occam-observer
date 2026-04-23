@@ -1,0 +1,359 @@
+#!/usr/bin/env bash
+# occam — convenience CLI for everyday operation.
+#
+#   ./occam start                 build (if needed) + run the Go gateway in background
+#   ./occam stop                  stop the gateway
+#   ./occam status                running? PID? port? DB?
+#   ./occam restart               stop + start
+#   ./occam logs [-f]             show the gateway log (tail -f with -f)
+#   ./occam analyze <path>        headless JSON telemetry on a repo
+#   ./occam check <path> [LEVEL]  gate mode (exit 0/1), default fail_on=high
+#   ./occam ui                    Vite dev server (hot reload) for the dashboard
+#   ./occam ui-build              rebuild static dashboard into api/public/
+#   ./occam test                  run the full regression suite
+#   ./occam doctor                dependency + environment diagnostic
+#   ./occam clean                 wipe runtime cache/log (keeps TSDB)
+#   ./occam clean --all           also wipe TSDB
+#   ./occam mcp                   show MCP client configuration snippets
+#   ./occam version               print version and exit
+#   ./occam help                  this screen
+set -u
+
+# ── Paths & runtime state ─────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENGINE_SCRIPT="${SCRIPT_DIR}/telemetry_observer.sh"
+API_DIR="${SCRIPT_DIR}/api"
+MCP_DIR="${SCRIPT_DIR}/mcp"
+WEB_DIR="${SCRIPT_DIR}/web"
+GATEWAY_BIN="${SCRIPT_DIR}/occam-api"
+MCP_BIN="${SCRIPT_DIR}/occam-mcp"
+
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
+PID_FILE="${RUNTIME_DIR}/occam-gateway.pid"
+LOG_FILE="${RUNTIME_DIR}/occam-gateway.log"
+
+DEFAULT_PORT=9999
+OCCAM_PORT="${OCCAM_PORT:-$DEFAULT_PORT}"
+OCCAM_DB_DEFAULT="${XDG_DATA_HOME:-$HOME/.local/share}/occam-observer/snapshots.db"
+OCCAM_DB="${OCCAM_DB:-$OCCAM_DB_DEFAULT}"
+
+# ── Colors ────────────────────────────────────────────────────────────────────
+if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
+    C_RESET=$'\033[0m' C_BOLD=$'\033[1m' C_DIM=$'\033[2m'
+    C_GREEN=$'\033[32m' C_RED=$'\033[31m' C_YELLOW=$'\033[33m' C_CYAN=$'\033[36m'
+else
+    C_RESET='' C_BOLD='' C_DIM='' C_GREEN='' C_RED='' C_YELLOW='' C_CYAN=''
+fi
+
+ok()   { printf "${C_GREEN}✓${C_RESET} %s\n" "$*"; }
+warn() { printf "${C_YELLOW}⚠${C_RESET} %s\n" "$*"; }
+err()  { printf "${C_RED}✗${C_RESET} %s\n" "$*" >&2; }
+info() { printf "${C_CYAN}→${C_RESET} %s\n" "$*"; }
+section() { printf "${C_BOLD}%s${C_RESET}\n" "$*"; }
+
+die() { err "$*"; exit 1; }
+
+occam_version() {
+    # Single source of truth: the bash engine's readonly constant
+    grep -E '^readonly OCCAM_VERSION=' "$ENGINE_SCRIPT" 2>/dev/null \
+        | head -1 \
+        | sed -E 's/.*"([^"]+)".*/\1/'
+}
+
+# ── PID helpers ───────────────────────────────────────────────────────────────
+read_pid() {
+    [ -f "$PID_FILE" ] || return 1
+    local p; p="$(cat "$PID_FILE" 2>/dev/null)"
+    case "$p" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$p" 2>/dev/null || return 1
+    printf '%s' "$p"
+}
+
+# ── Builds ────────────────────────────────────────────────────────────────────
+build_if_stale() {
+    local bin="$1" src_dir="$2"
+    command -v go >/dev/null 2>&1 || die "go not installed (needed to build $bin)"
+    if [ -x "$bin" ]; then
+        # Rebuild if any .go file is newer than the binary.
+        if [ -z "$(find "$src_dir" -name '*.go' -newer "$bin" 2>/dev/null | head -1)" ]; then
+            return 0
+        fi
+        info "rebuilding $(basename "$bin") (sources changed)"
+    else
+        info "building $(basename "$bin")"
+    fi
+    ( cd "$src_dir" && go build -trimpath -o "$bin" . ) || die "go build failed"
+}
+
+# ── Commands ──────────────────────────────────────────────────────────────────
+
+cmd_start() {
+    if pid=$(read_pid); then
+        ok "gateway already running (pid=$pid on port ${OCCAM_PORT})"
+        return 0
+    fi
+    build_if_stale "$GATEWAY_BIN" "$API_DIR"
+    [ -x "$ENGINE_SCRIPT" ] || die "engine script not executable: $ENGINE_SCRIPT"
+
+    # Ensure DB directory exists so the gateway can init schemas on first hit.
+    mkdir -p "$(dirname "$OCCAM_DB")"
+
+    info "starting gateway on 127.0.0.1:${OCCAM_PORT}"
+    (
+        ENGINE_SCRIPT="$ENGINE_SCRIPT" \
+        OCCAM_DB="$OCCAM_DB" \
+        API_PORT="$OCCAM_PORT" \
+        exec "$GATEWAY_BIN"
+    ) > "$LOG_FILE" 2>&1 &
+    local pid=$!
+    # Detach from our shell so ctrl+c here doesn't kill it.
+    disown "$pid" 2>/dev/null || true
+    printf '%s\n' "$pid" > "$PID_FILE"
+
+    # Wait up to 3s for the port to respond.
+    local i=0
+    while [ $i -lt 30 ]; do
+        if curl -sf "http://127.0.0.1:${OCCAM_PORT}/healthz" >/dev/null 2>&1; then
+            ok "gateway up (pid=$pid, port=${OCCAM_PORT}, log=${LOG_FILE})"
+            printf "  %sanalyze:%s  curl '%s/analyze?path=/abs/repo'\n" "$C_DIM" "$C_RESET" "http://127.0.0.1:${OCCAM_PORT}"
+            printf "  %sui:%s       http://127.0.0.1:${OCCAM_PORT}/ui/\n"          "$C_DIM" "$C_RESET"
+            return 0
+        fi
+        sleep 0.1
+        i=$((i+1))
+    done
+    err "gateway did not respond within 3s; tail of log:"
+    tail -20 "$LOG_FILE" >&2
+    return 1
+}
+
+cmd_stop() {
+    if pid=$(read_pid); then
+        info "stopping gateway (pid=$pid)"
+        kill "$pid" 2>/dev/null || true
+        # Give it a breath, then SIGKILL if still alive.
+        local i=0
+        while kill -0 "$pid" 2>/dev/null && [ $i -lt 20 ]; do
+            sleep 0.1; i=$((i+1))
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            warn "pid=$pid didn't exit on SIGTERM, sending SIGKILL"
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+        rm -f "$PID_FILE"
+        ok "gateway stopped"
+    else
+        warn "gateway not running (no valid pid file)"
+        rm -f "$PID_FILE" 2>/dev/null
+    fi
+}
+
+cmd_restart() {
+    cmd_stop
+    cmd_start
+}
+
+cmd_status() {
+    section "Occam Observer v$(occam_version)"
+    printf "  %spaths%s\n" "$C_BOLD" "$C_RESET"
+    printf "    engine:   %s\n" "$ENGINE_SCRIPT"
+    printf "    api/:     %s\n" "$API_DIR"
+    printf "    db:       %s\n" "$OCCAM_DB"
+    printf "    log:      %s\n" "$LOG_FILE"
+    printf "    pidfile:  %s\n" "$PID_FILE"
+    printf "\n  %sgateway%s\n" "$C_BOLD" "$C_RESET"
+    if pid=$(read_pid); then
+        ok "running (pid=$pid, port=${OCCAM_PORT})"
+        if body="$(curl -sf "http://127.0.0.1:${OCCAM_PORT}/healthz" 2>/dev/null)"; then
+            uptime="$(printf '%s' "$body" | sed -E 's/.*"uptime_seconds":([0-9.]+).*/\1/')"
+            printf "    uptime:   %ss\n" "$uptime"
+        fi
+        if body="$(curl -sf "http://127.0.0.1:${OCCAM_PORT}/metrics" 2>/dev/null)"; then
+            ok_total="$(printf '%s' "$body" | awk '/^occam_analyses_total\{result="ok"\}/ {print $2}')"
+            err_total="$(printf '%s' "$body" | awk '/^occam_analyses_total\{result="error"\}/ {print $2}')"
+            snap="$(printf '%s' "$body" | awk '/^occam_snapshots_total/ {print $2}')"
+            printf "    analyses: ok=%s err=%s\n" "${ok_total:-?}" "${err_total:-?}"
+            printf "    snapshots: %s\n" "${snap:-?}"
+        fi
+    else
+        warn "not running"
+    fi
+    printf "\n  %stsdb%s\n" "$C_BOLD" "$C_RESET"
+    if [ -f "$OCCAM_DB" ]; then
+        if command -v sqlite3 >/dev/null 2>&1; then
+            rows="$(sqlite3 -readonly "$OCCAM_DB" 'SELECT COUNT(*) FROM snapshots;' 2>/dev/null)"
+            obs="$(sqlite3 -readonly "$OCCAM_DB"  'SELECT COUNT(*) FROM observations;' 2>/dev/null)"
+            claims="$(sqlite3 -readonly "$OCCAM_DB" 'SELECT COUNT(*) FROM claims;' 2>/dev/null)"
+            printf "    snapshots=%s  observations=%s  claims=%s\n" "${rows:-?}" "${obs:-?}" "${claims:-?}"
+        else
+            printf "    (sqlite3 not available — cannot inspect)\n"
+        fi
+    else
+        printf "    (not created yet — runs after first /analyze)\n"
+    fi
+}
+
+cmd_logs() {
+    [ -f "$LOG_FILE" ] || die "no log yet (start the gateway first)"
+    if [ "${1:-}" = "-f" ]; then
+        exec tail -f "$LOG_FILE"
+    else
+        tail -100 "$LOG_FILE"
+    fi
+}
+
+cmd_analyze() {
+    local path="${1:-}"
+    [ -n "$path" ] || die "usage: occam analyze <path>"
+    exec "$ENGINE_SCRIPT" --json "$path"
+}
+
+cmd_check() {
+    local path="${1:-}"; local level="${2:-high}"
+    [ -n "$path" ] || die "usage: occam check <path> [low|medium|high|critical]"
+    exec "$ENGINE_SCRIPT" --check --fail-on="$level" "$path"
+}
+
+cmd_ui() {
+    [ -d "$WEB_DIR" ] || die "no web/ directory"
+    command -v npm >/dev/null 2>&1 || die "npm not installed"
+    if [ ! -d "$WEB_DIR/node_modules" ]; then
+        info "installing web/ dependencies (first run)"
+        ( cd "$WEB_DIR" && npm ci ) || die "npm ci failed"
+    fi
+    info "starting Vite dev server — connect from http://localhost:5173/"
+    info "the gateway must be running separately for data to appear"
+    exec bash -c "cd \"$WEB_DIR\" && npm run dev"
+}
+
+cmd_ui_build() {
+    [ -x "${SCRIPT_DIR}/scripts/build-ui.sh" ] || die "scripts/build-ui.sh not found"
+    exec "${SCRIPT_DIR}/scripts/build-ui.sh"
+}
+
+cmd_test() {
+    [ -x "${SCRIPT_DIR}/run_tests.sh" ] || die "run_tests.sh not found"
+    exec "${SCRIPT_DIR}/run_tests.sh"
+}
+
+cmd_doctor() {
+    section "dependency probe"
+    local missing=0
+    for tool in bash git jq sqlite3 go python3 fswatch inotifywait semgrep curl npm docker; do
+        if command -v "$tool" >/dev/null 2>&1; then
+            ok "$(printf '%-10s' "$tool") $(command -v "$tool")"
+        else
+            printf "${C_DIM}·${C_RESET} %-10s ${C_DIM}(not installed)${C_RESET}\n" "$tool"
+        fi
+    done
+
+    section ""
+    section "ports"
+    if command -v lsof >/dev/null 2>&1; then
+        if lsof -i :"${OCCAM_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+            local owner; owner="$(lsof -i :"${OCCAM_PORT}" -sTCP:LISTEN -n -P 2>/dev/null | awk 'NR==2 {print $1 " (pid=" $2 ")"}')"
+            warn "port ${OCCAM_PORT} is in use by $owner"
+        else
+            ok "port ${OCCAM_PORT} free"
+        fi
+    else
+        info "lsof not installed — cannot probe port"
+    fi
+
+    section ""
+    section "filesystem"
+    [ -x "$ENGINE_SCRIPT" ] && ok "engine executable"         || err "engine not executable: $ENGINE_SCRIPT"
+    [ -d "$API_DIR" ]       && ok "api/ directory present"    || err "api/ missing"
+    [ -d "$MCP_DIR" ]       && ok "mcp/ directory present"    || warn "mcp/ missing (optional)"
+    [ -d "$WEB_DIR" ]       && ok "web/ directory present"    || warn "web/ missing (optional)"
+    [ -d "${SCRIPT_DIR}/analyzers" ] && ok "analyzers/ present" || warn "analyzers/ missing"
+
+    section ""
+    section "config"
+    if [ -f "${SCRIPT_DIR}/config/main.yml" ]; then
+        if "$ENGINE_SCRIPT" --validate >/dev/null 2>&1; then
+            ok "config/main.yml validates"
+        else
+            err "config/main.yml does NOT validate — run: $ENGINE_SCRIPT --validate"
+        fi
+    else
+        warn "config/main.yml missing"
+    fi
+}
+
+cmd_clean() {
+    local all="${1:-}"
+    info "removing gateway log: $LOG_FILE"
+    rm -f "$LOG_FILE"
+    info "removing pid file: $PID_FILE"
+    rm -f "$PID_FILE"
+    info "removing write-through cache: /tmp/occam_state.json + /tmp/occam_json_* + /tmp/occam_state_*"
+    rm -f /tmp/occam_state.json /tmp/occam_json_*.json /tmp/occam_state_*.json 2>/dev/null
+    if [ "$all" = "--all" ]; then
+        warn "wiping TSDB at $OCCAM_DB (--all)"
+        rm -f "$OCCAM_DB" "${OCCAM_DB}-wal" "${OCCAM_DB}-shm"
+    else
+        info "keeping TSDB ($OCCAM_DB) — use --all to also wipe history"
+    fi
+    ok "clean done"
+}
+
+cmd_mcp() {
+    build_if_stale "$MCP_BIN" "$MCP_DIR"
+    section "MCP client configuration"
+    cat <<EOF
+
+The MCP server is a stdio binary; the client spawns it as a subprocess.
+Binary path: ${C_BOLD}${MCP_BIN}${C_RESET}
+
+${C_BOLD}Claude Desktop${C_RESET}
+  macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json
+  Windows: %APPDATA%\\Claude\\claude_desktop_config.json
+
+  {
+    "mcpServers": {
+      "occam": {
+        "command": "${MCP_BIN}",
+        "env": {
+          "ENGINE_SCRIPT": "${ENGINE_SCRIPT}",
+          "OCCAM_API_URL": "http://127.0.0.1:${OCCAM_PORT}",
+          "OCCAM_DB":      "${OCCAM_DB}"
+        }
+      }
+    }
+  }
+
+${C_BOLD}Cursor${C_RESET}   ~/.cursor/mcp.json        — same "mcpServers" shape as Claude Desktop
+${C_BOLD}Windsurf${C_RESET} ~/.codeium/windsurf/mcp_config.json
+${C_BOLD}VS Code${C_RESET}  .vscode/mcp.json (workspace) — use {"type":"stdio","command":"${MCP_BIN}",...}
+
+Full per-client snippets: ${C_DIM}docs/guide/mcp.md${C_RESET}
+
+Remember: most coordination tools HTTP-proxy to the gateway, so start the
+gateway first (${C_BOLD}./occam start${C_RESET}) before the MCP client tries to use them.
+EOF
+}
+
+cmd_help() {
+    sed -n '2,19p' "${BASH_SOURCE[0]}" | sed -E 's/^# ?//'
+}
+
+# ── Dispatch ──────────────────────────────────────────────────────────────────
+case "${1:-help}" in
+    start)     shift; cmd_start "$@" ;;
+    stop)      shift; cmd_stop ;;
+    restart)   shift; cmd_restart ;;
+    status)    shift; cmd_status ;;
+    logs)      shift; cmd_logs "$@" ;;
+    analyze)   shift; cmd_analyze "$@" ;;
+    check)     shift; cmd_check "$@" ;;
+    ui)        shift; cmd_ui ;;
+    ui-build)  shift; cmd_ui_build ;;
+    test)      shift; cmd_test ;;
+    doctor)    shift; cmd_doctor ;;
+    clean)     shift; cmd_clean "$@" ;;
+    mcp)       shift; cmd_mcp ;;
+    version|-v|--version) occam_version ;;
+    help|-h|--help|"") cmd_help ;;
+    *) err "unknown command: $1"; cmd_help; exit 2 ;;
+esac

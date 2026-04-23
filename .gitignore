@@ -43,3 +43,7 @@ api/server.exe
 # Legacy ad-hoc test stubs (root-level only). The real regression suite
 # lives under tests/ and is tracked.
 /test_*
+
+# Built binaries (from ./occam start / scripts/build-ui.sh)
+occam-api
+occam-mcp
