@@ -1,0 +1,42 @@
+# =============================================================================
+# Occam Observer — Enterprise Tech Debt & Hygiene (10x Extension)
+# =============================================================================
+# Pattern per intercettare scorie di debug, bypass temporanei e debito tecnico.
+# Progettati per prevenire la "Teoria delle Finestre Rotte".
+patterns_hygiene:
+  # --- 1. Marker di Debito Tecnico (Isolati con \b per evitare falsi positivi) ---
+  - "\\b(todo|fixme|hack|xxx|wip|bug|refactor|optimize)\\b"
+  
+  # --- 2. Leftovers di Debugging (Ecosistema JS/TS) ---
+  - "\\bconsole\\.(log|debug|dir|trace|table|time)\\b"
+  - "\\bdebugger\\b"
+  - "\\balert\\("
+  
+  # --- 3. Leftovers di Debugging (Python, Ruby, PHP) ---
+  - "\\bprint\\("
+  - "\\b(breakpoint\\(\\)|import pdb|pdb\\.set_trace\\(\\))"
+  - "\\bbinding\\.(pry|irb)\\b"
+  - "\\bbyebug\\b"
+  - "\\b(dd|var_dump|print_r|die)\\("
+  
+  # --- 4. Leftovers di Debugging (Go, Java, C#, C++) ---
+  - "\\bfmt\\.Print(ln|f)?\\("
+  - "\\bSystem\\.out\\.print(ln)?\\("
+  - "\\bConsole\\.Write(Line)?\\("
+  - "\\bpanic\\("
+  - "\\blog\\.Fatal\\("
+  
+  # --- 5. "Test Suite Killers" (Modificatori di esclusione test) ---
+  # Un test con .only o fit() salta il resto della suite. Non deve MAI finire in produzione.
+  - "\\b(describe|it|test)\\.only\\b"
+  - "\\b(fdescribe|fit)\\("
+  - "\\b(describe|it|test)\\.skip\\b"
+  - "\\b(xdescribe|xit)\\("
+  
+  # --- 6. Bypass Architetturali Temporanei ---
+  # Avvisa se lo sviluppatore sta spegnendo i controlli di sicurezza o di tipo.
+  - "@ts-ignore"
+  - "@ts-expect-error"
+  - "eslint-disable(-next-line)?"
+  - "#[ \t]*nosec"
+  - "//[ \t]*nolint"

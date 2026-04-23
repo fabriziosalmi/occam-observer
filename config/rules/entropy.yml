@@ -1,0 +1,50 @@
+# =============================================================================
+# Occam Observer — Enterprise Entropy Patterns (10x Extension)
+# =============================================================================
+# Nodi logici agnostici per calcolare il proxy della Complessità Ciclomatica.
+# Il motore li avvolge automaticamente in word boundaries: \b(if|for|...)\b
+patterns_complexity:
+  # --- 1. Ramificazioni Primarie (Biforcazioni del grafo) ---
+  - if
+  - else
+  - elif       # Python, Bash
+  - elsif      # Ruby, Perl
+  - unless     # Ruby, Perl
+  
+  # --- 2. Pattern Matching e Selettori ---
+  - switch
+  - match      # Rust, PHP 8+, Python 3.10+
+  - case
+  - default
+  
+  # --- 3. Cicli e Iterazioni (Aumento esponenziale della complessità) ---
+  - for
+  - foreach    # PHP, C#
+  - while
+  - do
+  - loop       # Rust, Ruby
+  
+  # --- 4. Modificatori di Salto (Interrompono il flusso lineare) ---
+  - return
+  - break
+  - continue
+  - fallthrough # Go, Swift
+  
+  # --- 5. Gestione delle Eccezioni (Percorsi di esecuzione ombra) ---
+  - try
+  - catch
+  - except     # Python
+  - rescue     # Ruby
+  - finally
+  - ensure     # Ruby
+  - throw
+  - raise      # Python, Ruby
+  - panic      # Go, Rust
+  
+  # --- 6. Concorrenza, Sincronizzazione e Asincronia (Alto carico cognitivo) ---
+  - await
+  - yield
+  - async
+  - go         # Go
+  - defer      # Go, Swift
+  - spawn      # Elixir, Erlang

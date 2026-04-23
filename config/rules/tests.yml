@@ -1,0 +1,35 @@
+# =============================================================================
+# Occam Observer — Enterprise Validation Patterns (10x Extension)
+# =============================================================================
+# Regex rigorose applicate ai path restituiti da 'git diff --name-only'.
+# Usano ancore di inizio cartella (^|/) e fine file ($) per evitare falsi positivi 
+# (esclude 'contest.js', 'latest.py', 'specifics.md').
+patterns_validation:
+  # --- 1. Ecosistema JavaScript / TypeScript (Jest, Vitest, Mocha, Cypress, Playwright) ---
+  - "\\.(test|spec)\\.(js|jsx|ts|tsx|mjs|cjs)$"
+  - "\\.cy\\.(js|jsx|ts|tsx)$"
+  - "(^|/)__(tests|mocks|snapshots)__/"
+  - "(^|/)(cypress|playwright)/.*\\.(js|ts)$"
+
+  # --- 2. Ecosistema Python (Pytest, Unittest) ---
+  - "(^|/)test_[^/]+\\.py$"
+  - "_test\\.py$"
+  - "(^|/)conftest\\.py$"
+
+  # --- 3. Ecosistema Go ---
+  - "_test\\.go$"
+
+  # --- 4. Ecosistema Java / Kotlin / C# / Scala (JUnit, NUnit, xUnit) ---
+  - "[A-Za-z0-9_]Test(s|Case)?\\.(java|kt|cs|scala)$"
+  - "(^|/)src/test/"
+
+  # --- 5. Ecosistema Ruby & PHP (RSpec, Minitest, PHPUnit, Pest) ---
+  - "_(spec|test)\\.rb$"
+  - "[A-Za-z0-9_]Test\\.php$"
+
+  # --- 6. Ecosistema Rust & C/C++ ---
+  - "(^|/)(tests|benches)/.*\\.rs$"
+  - "(^|/)test_[^/]+\\.(c|cpp|cc|cxx|h|hpp)$"
+
+  # --- 7. Pattern Strutturali Generici (Directory e naming comuni) ---
+  - "(^|/)(tests?|specs?|testing|integration_tests?|e2e_tests?|e2e)/"

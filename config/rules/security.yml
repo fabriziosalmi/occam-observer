@@ -1,0 +1,59 @@
+# =============================================================================
+# Occam Observer — Enterprise Security Patterns (10x Extension)
+# =============================================================================
+# Regex rigorose progettate per eliminare i falsi positivi usando anchor e bounds.
+patterns_security:
+  # --- 1. Cloud Providers (AWS, GCP, Azure, ecc.) ---
+  - "(AKIA|A3T|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}" # AWS Access Key
+  - "(?i)aws_secret_access_key[ \t]*[:=][ \t]*['\"]?[A-Za-z0-9/+=]{40}['\"]?" # AWS Secret Key strict
+  - "AIza[0-9A-Za-z\\-_]{35}" # Google Cloud API Key
+  - "ya29\\.[0-9A-Za-z\\-_]+" # Google OAuth Access Token
+  - "ya29\\.[a-zA-Z0-9_-]{100,}" # GCP Service Account token
+  - "sl\\.[a-zA-Z0-9\\-_]{100,}" # Google Cloud Platform (GCP)
+  
+  # --- 2. Code Repositories & CI/CD ---
+  - "gh[poau]_[a-zA-Z0-9]{36}" # GitHub Personal/Oauth/App Tokens
+  - "github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}" # GitHub Fine-Grained PAT
+  - "glpat-[A-Za-z0-9\\-\\_]{20}" # GitLab Personal Access Token
+  - "npm_[a-zA-Z0-9]{36}" # NPM Access Token
+  - "pt_[a-zA-Z0-9]{40}" # PyPI Upload Token
+  
+  # --- 3. Pagamenti e Finanza ---
+  - "[sr]k_(live|test)_[0-9a-zA-Z]{24,99}" # Stripe Standard & Restricted Keys
+  - "sq0csp-[0-9A-Za-z\\-_]{43}" # Square Access Token
+  - "sq0[a-z]{3}-[0-9A-Za-z\\-_]{22,43}" # Square OAuth Secret
+  - "amzn\\.mws\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}" # Amazon MWS
+  - "access_token\\$production\\$[0-9a-z]{16}\\$[0-9a-f]{32}" # PayPal Braintree
+  
+  # --- 4. Comunicazione e Servizi API ---
+  - "xox[baprs]-[0-9]+-[a-zA-Z0-9]+" # Slack Tokens (Bot, User, App, ecc.)
+  - "T[a-zA-Z0-9_]{23}\\.[a-zA-Z0-9_]{6}\\.[a-zA-Z0-9_]{27}" # Discord Bot Token
+  - "SG\\.[a-zA-Z0-9_\\-]{22}\\.[a-zA-Z0-9_\\-]{43}" # SendGrid API Key
+  - "SK[0-9a-fA-F]{32}" # Twilio API Key
+  - "key-[0-9a-zA-Z]{32}" # Mailgun API Key
+  
+  # --- 5. Intelligenza Artificiale ---
+  - "sk-[a-zA-Z0-9]{48}" # OpenAI Standard Key
+  - "sk-proj-[A-Za-z0-9_-]{20,}" # OpenAI Project/Organization Keys
+  - "sk-ant-api[a-z0-9-]{36,}" # Anthropic API Key
+  - "hf_[a-zA-Z0-9]{34}" # HuggingFace Access Token
+  
+  # --- 6. Chiavi Crittografiche e Certificati (Strict) ---
+  - "-----BEGIN RSA PRIVATE KEY-----"
+  - "-----BEGIN DSA PRIVATE KEY-----"
+  - "-----BEGIN EC PRIVATE KEY-----"
+  - "-----BEGIN PGP PRIVATE KEY BLOCK-----"
+  - "-----BEGIN OPENSSH PRIVATE KEY-----"
+  - "-----BEGIN (ENCRYPTED |)PRIVATE KEY-----"
+  - "puTTY-User-Key-File-[0-9]+" # PuTTY PPK file start
+  
+  # --- 7. Generic Credentials (Strict Context) ---
+  # Rileva solo variabili tipiche (password, secret, token) seguite da assegnazione forte
+  # e da un valore lungo almeno 16 caratteri alfanumerici senza spazi (alta entropia approssimata).
+  # Esempio catturato: DB_PASSWORD = "S0m3V3ryL0ngP4ssw0rd!"
+  # Esempio escluso (Falso Positivo): password = user_input
+  - "(?i)(password|passwd|secret|api_key|token)[-_a-zA-Z0-9]*[ \t]*[:=][ \t]*['\"][A-Za-z0-9\\-_!@#\\$%^&*]{16,}['\"]"
+  
+  # --- 8. URL e URI con Credenziali in chiaro ---
+  # Esempio: mongodb+srv://admin:P4ssW0rd@cluster.mongodb.net
+  - "[a-zA-Z]+:\\/\\/[a-zA-Z0-9_\\-]+:[a-zA-Z0-9_\\-\\.]+@[a-zA-Z0-9_\\-\\.]+"

@@ -1,0 +1,26 @@
+# =============================================================================
+# Occam Observer — Core Configuration
+# =============================================================================
+# Path of the Git repository to observe
+# Overridden if a positional argument is provided: ./telemetry_observer.sh /path
+target_path: ""
+
+# --- API SERVER (CQRS Read Model) ---
+# TCP port for the local REST server — O(1) read latency, no git exec.
+# Query with: curl http://127.0.0.1:9999/
+api_port: 9999
+
+# --- THRESHOLDS — MASS (Volume of code changed) ---
+threshold_mass_warn: 150
+threshold_mass_critical: 300
+
+# --- THRESHOLDS — ENTROPY (Cyclomatic complexity proxy) ---
+threshold_entropy_warn: 5
+threshold_entropy_critical: 10
+
+# --- BEHAVIOR ---
+# Trigger an acoustic terminal bell (\a) on SECURITY alarms
+bell_on_critical: true
+
+# Initial startup wait time (seconds) to read the header
+startup_delay: 2

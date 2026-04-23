@@ -1,0 +1,60 @@
+/**
+ * Occam Observer Premium Theme
+ * Inspired by Apple/Vercel design systems
+ */
+
+:root {
+  --vp-c-brand-1: #10b981; /* Emerald 500 */
+  --vp-c-brand-2: #34d399; /* Emerald 400 */
+  --vp-c-brand-3: #059669; /* Emerald 600 */
+  
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: -webkit-linear-gradient(120deg, #10b981 30%, #3b82f6);
+  
+  --vp-home-hero-image-background-image: linear-gradient(-45deg, #10b981 50%, #3b82f6 50%);
+  --vp-home-hero-image-filter: blur(150px);
+}
+
+.dark {
+  --vp-c-brand-1: #34d399; /* Emerald 400 */
+  --vp-c-brand-2: #10b981; /* Emerald 500 */
+  --vp-c-brand-3: #6ee7b7; /* Emerald 300 */
+}
+
+/* Glassmorphism for Navbar */
+.VPNavBar {
+  backdrop-filter: saturate(180%) blur(20px);
+  background-color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.dark .VPNavBar {
+  background-color: rgba(9, 9, 11, 0.7) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+/* Typography Enhancements */
+body {
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Custom Block Highlights */
+.custom-block.info {
+  background-color: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.custom-block.warning {
+  background-color: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.2);
+}
+
+.custom-block.danger {
+  background-color: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+/* Code block styling */
+div[class*="language-"] {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+}

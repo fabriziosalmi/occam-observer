@@ -1,0 +1,43 @@
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+
+# Vite / React Web UI
+web/dist/
+web/dist-ssr/
+web/coverage/
+web/.eslintcache
+
+# VitePress Docs
+docs/.vitepress/dist
+docs/.vitepress/cache
+
+# Go API Gateway
+api/server
+api/server.exe
+*.test
+*.out
+*.prof
+
+# IDEs and Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary and test files
+/tmp/
+*.log
+test_*
