@@ -47,3 +47,9 @@ api/server.exe
 # Built binaries (from ./occam start / scripts/build-ui.sh)
 occam-api
 occam-mcp
+
+# Local design scratchpads for upcoming versions — not published history
+# until they land as code + docs/guide/*.md.
+v0.3.0.md
+v0.4.0.md
+v0.*.md

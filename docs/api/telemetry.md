@@ -176,6 +176,11 @@ Content-Type: application/json
 
 ### Field notes
 
+- **`is_idle`** — `true` when the chosen `diff_mode` yields no content (the
+  clean-tree case). `false` when the engine actually had something to
+  analyze. Clients that hide the dashboard's intelligence panel should
+  branch on this; clients that treat the presence of metrics as the signal
+  should instead check `metrics.mass_files_changed > 0`.
 - **`trace_id`** — empty string if the engine was invoked directly (no HTTP).
 - **`diff_mode`** — `head` \| `staged` \| `working`, matches the engine flag.
 - **`violations[].blame.commit`** — short hash (12 chars) or the literal
