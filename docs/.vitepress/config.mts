@@ -2,6 +2,20 @@ import { defineConfig } from 'vitepress'
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
+  head: [
+    // Tutto first-party. 'unsafe-inline' serve perche' VitePress emette
+    // uno script inline per il tema e stili inline.
+    [
+      'meta',
+      {
+        'http-equiv': 'Content-Security-Policy',
+        content:
+          "default-src 'self'; script-src 'self' 'unsafe-inline'; " +
+          "style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+          "font-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'",
+      },
+    ],
+  ],
   title: 'Occam Observer',
   description: 'Out-of-band Git telemetry for human reviewers and AI agents',
   base: '/occam-observer/',
@@ -47,7 +61,7 @@ export default defineConfig({
     ],
 
     footer: {
-      message:   'Released under the MIT License.',
+      message:   'Released under the MIT License.' + ' · <a href="https://fabriziosalmi.github.io/privacy">Privacy &amp; legal</a>',
       copyright: 'Copyright © 2026 Fabrizio Salmi',
     },
 
