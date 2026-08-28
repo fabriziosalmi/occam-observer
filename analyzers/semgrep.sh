@@ -61,35 +61,43 @@ raw="$(semgrep --config="$SEMGREP_CONFIG" \
     exit 0
 }
 
+# Ensure raw is valid JSON; if empty or invalid, treat as no findings.
+if ! printf '%s' "$raw" | jq empty 2>/dev/null; then
+    printf '{"name":"semgrep","version":"%s","findings":[]}\n' "$(semgrep --version 2>/dev/null | head -1)"
+    exit 0
+fi
+
 # Map Semgrep's severity (ERROR / WARNING / INFO) → Occam severity.
 # Map Semgrep's metadata.impact (HIGH/MEDIUM/LOW) to refine when present.
 printf '%s' "$raw" | jq --arg target "$TARGET" --arg ver "$(semgrep --version 2>/dev/null | head -1)" '{
     name: "semgrep",
     version: $ver,
-    findings: [
-        .results[]? | {
-            severity: (
-                .extra.severity as $s
-                | .extra.metadata.impact as $i
-                | if   $i == "HIGH"   or $s == "ERROR"   then "critical"
-                  elif $i == "MEDIUM" or $s == "WARNING" then "high"
-                  elif $i == "LOW"                       then "medium"
-                  elif $s == "INFO"                      then "low"
-                  else "info" end
-            ),
-            kind: (
-                (.extra.metadata.category // "") as $c
-                | if $c == "security"       then "security"
-                  elif $c == "correctness"  then "bug"
-                  elif $c == "performance"  then "perf"
-                  elif $c == "best-practice" or $c == "maintainability" then "debt"
-                  else "other" end
-            ),
-            rule_id:  (.check_id // "unknown"),
-            file:     (.path | sub("^" + $target + "/?"; "")),
-            line:     (.start.line // 0),
-            message:  (.extra.message // .check_id),
-            text:     (.extra.lines // "" | .[0:200])
-        }
-    ]
+    findings: (
+        (.results // []) | map(
+            {
+                severity: (
+                    .extra.severity as $s
+                    | .extra.metadata.impact as $i
+                    | if   $i == "HIGH"   or $s == "ERROR"   then "critical"
+                      elif $i == "MEDIUM" or $s == "WARNING" then "high"
+                      elif $i == "LOW"                       then "medium"
+                      elif $s == "INFO"                      then "low"
+                      else "info" end
+                ),
+                kind: (
+                    (.extra.metadata.category // "") as $c
+                    | if $c == "security"       then "security"
+                      elif $c == "correctness"  then "bug"
+                      elif $c == "performance"  then "perf"
+                      elif $c == "best-practice" or $c == "maintainability" then "debt"
+                      else "other" end
+                ),
+                rule_id:  (.check_id // "unknown"),
+                file:     (.path | sub("^" + $target + "/?"; "")),
+                line:     (.start.line // 0),
+                message:  (.extra.message // .check_id),
+                text:     (.extra.lines // "" | .[0:200])
+            }
+        )
+    )
 }'
