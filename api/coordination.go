@@ -1566,6 +1566,7 @@ func handleObservation(w http.ResponseWriter, r *http.Request) {
 	}
 	insertSQL := fmt.Sprintf(
 		"INSERT INTO observations(ts, run_id, agent, subtask_id, model, branch, commit_sha, outcome, touched_files, failure_modes, confidence, extra, raw_json) "+
+			// slopless-disable-next-line VBC-004 -- a literal Sprintf template whose every %s is filled by a sqlLit call below
 			"VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s); "+
 			"SELECT last_insert_rowid();",
 		sqlLit(ts),
@@ -1658,8 +1659,10 @@ func handleAgentLog(w http.ResponseWriter, r *http.Request) {
 	}
 	q := "SELECT id, ts, run_id, agent, subtask_id, model, branch, commit_sha, outcome, touched_files, failure_modes, confidence FROM observations"
 	if len(where) > 0 {
+		// slopless-disable-next-line VBC-004 -- where holds literal clause fragments; their values are already inside sqlLit calls above
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
+	// slopless-disable-next-line VBC-004 -- ORDER BY names a literal column; the only value is an integer, which cannot carry SQL
 	q += " ORDER BY id DESC LIMIT " + strconv.Itoa(limit) + ";"
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -1699,6 +1702,7 @@ func handleClaim(w http.ResponseWriter, r *http.Request) {
 
 	// Every request first prunes expired rows — lazy GC.
 	_ = sqliteExec(ctx, dbPath,
+		// slopless-disable-next-line VBC-004 -- sqlLit doubles single quotes, the complete escape for SQLite, and the query reaches sqlite3 as an argv element rather than through a shell
 		"DELETE FROM claims WHERE expires_at < "+sqlLit(time.Now().UTC().Format(time.RFC3339))+";")
 
 	switch r.Method {
@@ -1717,6 +1721,7 @@ func claimGet(ctx context.Context, w http.ResponseWriter, r *http.Request, dbPat
 	path := r.URL.Query().Get("path")
 	q := "SELECT lock_id, path, agent, run_id, acquired, expires_at FROM claims"
 	if path != "" {
+		// slopless-disable-next-line VBC-004 -- sqlLit doubles single quotes, the complete escape for SQLite, and the query reaches sqlite3 as an argv element rather than through a shell
 		q += " WHERE path = " + sqlLit(path)
 	}
 	q += " ORDER BY acquired DESC;"
@@ -1762,6 +1767,7 @@ func claimAcquire(ctx context.Context, w http.ResponseWriter, r *http.Request, d
 	// Check existing
 	var existing []map[string]any
 	_ = sqliteExecJSON(ctx, dbPath,
+		// slopless-disable-next-line VBC-004 -- sqlLit doubles single quotes, the complete escape for SQLite, and the query reaches sqlite3 as an argv element rather than through a shell
 		"SELECT lock_id, agent, run_id, expires_at FROM claims WHERE path = "+sqlLit(req.Path)+";",
 		&existing)
 	if len(existing) > 0 {
@@ -1807,8 +1813,10 @@ func claimRelease(ctx context.Context, w http.ResponseWriter, r *http.Request, d
 	}
 	var q string
 	if lockID != "" {
+		// slopless-disable-next-line VBC-004 -- sqlLit doubles single quotes, the complete escape for SQLite, and the query reaches sqlite3 as an argv element rather than through a shell
 		q = "DELETE FROM claims WHERE lock_id = " + sqlLit(lockID) + ";"
 	} else {
+		// slopless-disable-next-line VBC-004 -- sqlLit doubles single quotes, the complete escape for SQLite, and the query reaches sqlite3 as an argv element rather than through a shell
 		q = "DELETE FROM claims WHERE path = " + sqlLit(path) + ";"
 	}
 	_ = sqliteExec(ctx, dbPath, q)

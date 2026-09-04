@@ -507,8 +507,10 @@ func handleTrend(w http.ResponseWriter, r *http.Request) {
 		"entropy_nodes, test_files_modified, debt_issues, check_level, diff_mode " +
 		"FROM snapshots"
 	if len(where) > 0 {
+		// slopless-disable-next-line VBC-004 -- where holds literal clause fragments; their values are already inside sqlLiteral calls above
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
+	// slopless-disable-next-line VBC-004 -- ORDER BY names a literal column; the only value is an integer, which cannot carry SQL
 	query += " ORDER BY id DESC LIMIT " + strconv.Itoa(limitN) + ";"
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
