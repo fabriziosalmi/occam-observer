@@ -26,6 +26,9 @@ export default defineConfig({
   title: 'Occam Observer',
   description: 'Out-of-band Git telemetry for human reviewers and AI agents',
   base: '/occam-observer/',
+  // The hostname carries the base path on purpose: VitePress joins it with each
+  // page's route, so without it every URL in the sitemap would point at a 404.
+  sitemap: { hostname: 'https://fabriziosalmi.github.io/occam-observer/' },
   lastUpdated: true,
   cleanUrls: true,
   appearance: 'dark',
