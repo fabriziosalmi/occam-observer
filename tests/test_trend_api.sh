@@ -44,7 +44,14 @@ else fail "T1 rows=$rows want 3"; fi
 
 OCCAM_DB="$db" API_PORT="$port" "$bin" >/dev/null 2>&1 &
 API_PID=$!
-sleep 1
+
+# Wait for port to be ready
+for _ in {1..20}; do
+    if curl -sf "http://127.0.0.1:${port}/trend?limit=1" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.2
+done
 
 resp="$(curl -sf "http://127.0.0.1:${port}/trend?limit=100" 2>/dev/null)"
 len="$(printf '%s' "$resp" | jq -r 'length' 2>/dev/null || echo 0)"
