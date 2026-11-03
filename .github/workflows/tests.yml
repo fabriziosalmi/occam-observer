@@ -25,10 +25,10 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Smoke: engine syntax
+      - name: "Smoke: engine syntax"
         run: bash -n telemetry_observer.sh
 
-      - name: Smoke: shipped config validates
+      - name: "Smoke: shipped config validates"
         run: ./telemetry_observer.sh --validate
 
       - name: go vet + build (api)
