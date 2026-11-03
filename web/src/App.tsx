@@ -191,7 +191,7 @@ function Playground({ defaultTarget }: { defaultTarget: string }) {
   return (
     <section
       aria-labelledby="pg-heading"
-      className="p-6 rounded-xl border border-border bg-card shadow-sm mt-6 space-y-4"
+      className="p-6 rounded-xl border border-border bg-card shadow-xs mt-6 space-y-4"
     >
       <h3 id="pg-heading" className="font-semibold text-lg flex items-center gap-2">
         <Terminal className="w-5 h-5 text-primary" aria-hidden="true" />
@@ -208,7 +208,7 @@ function Playground({ defaultTarget }: { defaultTarget: string }) {
           value={target}
           onChange={(e) => setTarget(e.target.value)}
           onKeyDown={onKeyDown}
-          className="flex-1 bg-background border border-border rounded-lg px-4 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/50"
+          className="flex-1 bg-background border border-border rounded-lg px-4 py-2 text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary/50"
           placeholder="/absolute/path/to/a/git/repo"
           spellCheck={false}
           autoCapitalize="off"
@@ -232,7 +232,7 @@ function Playground({ defaultTarget }: { defaultTarget: string }) {
       )}
       <pre
         aria-label="Analysis output"
-        className="p-4 rounded-lg bg-background border border-border text-xs font-mono text-muted-foreground overflow-x-auto max-h-96 whitespace-pre-wrap break-words"
+        className="p-4 rounded-lg bg-background border border-border text-xs font-mono text-muted-foreground overflow-x-auto max-h-96 whitespace-pre-wrap wrap-break-word"
       >
         {output}
       </pre>
@@ -314,7 +314,7 @@ export default function App() {
       <div className="max-w-6xl mx-auto space-y-6">
 
         {/* Header */}
-        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 rounded-xl border border-border bg-card shadow-sm">
+        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 rounded-xl border border-border bg-card shadow-xs">
           <div className="flex items-center gap-4">
             <div className="p-3 rounded-lg bg-primary/10">
               <Activity className="w-6 h-6 text-primary" aria-hidden="true" />
@@ -374,7 +374,7 @@ export default function App() {
             </span>
           )}
           {data.trace_id && (
-            <span className="sm:ml-auto text-[10px] font-mono opacity-60 truncate max-w-full">
+            <span className="sm:ml-auto text-[10px] leading-5 font-mono opacity-60 truncate max-w-full">
               trace_id={String(data.trace_id).slice(0, 16)}
             </span>
           )}
@@ -383,7 +383,7 @@ export default function App() {
         {/* Integrity score */}
         <section
           aria-label="Integrity score"
-          className="p-6 rounded-xl border border-border bg-card shadow-sm flex flex-col gap-4 relative overflow-hidden"
+          className="p-6 rounded-xl border border-border bg-card shadow-xs flex flex-col gap-4 relative overflow-hidden"
         >
           <div className="absolute top-0 left-0 w-full h-1 bg-border" aria-hidden="true">
             <div
@@ -415,7 +415,7 @@ export default function App() {
           <div className="lg:col-span-1 space-y-6">
 
             {data.git && (
-              <section aria-labelledby="git-heading" className="p-6 rounded-xl border border-border bg-card shadow-sm space-y-4">
+              <section aria-labelledby="git-heading" className="p-6 rounded-xl border border-border bg-card shadow-xs space-y-4">
                 <h3 id="git-heading" className="font-semibold flex items-center gap-2">
                   <GitCommit className="w-4 h-4 text-primary" aria-hidden="true" />
                   Git State
@@ -437,13 +437,13 @@ export default function App() {
                   </div>
                   <div className="pt-2">
                     <dt className="text-xs text-muted-foreground block mb-1">Message</dt>
-                    <dd className="text-sm leading-snug break-words">{data.git.message || "Uncommitted working tree"}</dd>
+                    <dd className="text-sm leading-snug wrap-break-word">{data.git.message || "Uncommitted working tree"}</dd>
                   </div>
                 </dl>
               </section>
             )}
 
-            <section aria-labelledby="vectors-heading" className="p-6 rounded-xl border border-border bg-card shadow-sm space-y-4">
+            <section aria-labelledby="vectors-heading" className="p-6 rounded-xl border border-border bg-card shadow-xs space-y-4">
               <h3 id="vectors-heading" className="font-semibold flex items-center gap-2">
                 <Activity className="w-4 h-4 text-primary" aria-hidden="true" />
                 State Vectors
@@ -498,7 +498,7 @@ export default function App() {
           <div className="lg:col-span-2 space-y-6">
             <section
               aria-labelledby="intel-heading"
-              className="p-6 rounded-xl border border-border bg-card shadow-sm h-full flex flex-col"
+              className="p-6 rounded-xl border border-border bg-card shadow-xs h-full flex flex-col"
             >
               <h3 id="intel-heading" className="font-semibold text-lg flex items-center gap-2 mb-6">
                 <Terminal className="w-5 h-5 text-primary" aria-hidden="true" />
@@ -595,7 +595,7 @@ export default function App() {
 
         {/* Violations */}
         {violations.length > 0 && (
-          <section aria-labelledby="vio-heading" className="p-6 rounded-xl border border-border bg-card shadow-sm space-y-3">
+          <section aria-labelledby="vio-heading" className="p-6 rounded-xl border border-border bg-card shadow-xs space-y-3">
             <h3 id="vio-heading" className="font-semibold flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-400" aria-hidden="true" />
               Violations ({violations.length})
@@ -605,12 +605,12 @@ export default function App() {
               {violations.slice(0, 10).map((v, i) => (
                 <li key={i} className="py-2 flex flex-col md:flex-row md:items-center md:gap-4 text-xs font-mono">
                   <span className={cn(
-                    "px-2 py-0.5 rounded uppercase tracking-wide text-[10px] w-fit",
+                    "px-2 py-0.5 rounded uppercase tracking-wide text-[10px] leading-4 w-fit",
                     v.kind === "security" ? "bg-rose-500/15 text-rose-300" : "bg-amber-500/15 text-amber-300"
                   )}>{v.kind}</span>
                   <span className="text-primary truncate">{v.file}:{v.line}</span>
                   <span className="text-muted-foreground truncate flex-1">{v.text}</span>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-[10px] leading-4 text-muted-foreground">
                     {v.blame?.commit === "uncommitted"
                       ? <span className="text-rose-300">new</span>
                       : `${(v.blame?.commit ?? "").slice(0, 7)} · ${(v.blame?.author ?? "").split("<")[0]}`}
@@ -623,7 +623,7 @@ export default function App() {
 
         {/* Analyzers */}
         {analyzers.length > 0 && (
-          <section aria-labelledby="an-heading" className="p-6 rounded-xl border border-border bg-card shadow-sm space-y-3">
+          <section aria-labelledby="an-heading" className="p-6 rounded-xl border border-border bg-card shadow-xs space-y-3">
             <h3 id="an-heading" className="font-semibold flex items-center gap-2">
               <FlaskConical className="w-4 h-4 text-primary" aria-hidden="true" />
               Analyzer findings
