@@ -148,7 +148,9 @@ probe_out="$(bash -c '
     CACHE_FILE="$(mktemp /tmp/occam_perm_check_XXXXXX.json)"
     write_cache "false" "main" "0000000" "$(date "+%Y-%m-%dT%H:%M:%S%z")" \
         0 0 0 0 0 0 0 100 "" "" "{}" "{}"
-    stat -f "%Lp" "$CACHE_FILE" 2>/dev/null || stat -c "%a" "$CACHE_FILE" 2>/dev/null
+    # GNU stat first: on Linux `stat -f` means --file-system and prints
+    # filesystem info before failing, which polluted the output.
+    stat -c "%a" "$CACHE_FILE" 2>/dev/null || stat -f "%Lp" "$CACHE_FILE" 2>/dev/null
     rm -f "$CACHE_FILE"
 ' _ "$OBSERVER" "$repo" 2>/dev/null)"
 if [[ "$probe_out" == "600" ]]; then

@@ -126,7 +126,7 @@ function useTelemetry(url: string, intervalMs = 2000) {
         throw new Error(`Non-JSON response: ${body.slice(0, 120)}`);
       }
     } catch (e: unknown) {
-      if ((e as any)?.name === "AbortError") return;
+      if ((e as { name?: unknown } | null)?.name === "AbortError") return;
       setError((e as Error)?.message ?? String(e));
     }
   }, [url]);
