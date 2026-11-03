@@ -64,6 +64,23 @@
   }
 }
 
+/*
+  Tailwind CSS v4 Preflight dropped two v3 defaults this dashboard relies on:
+  enabled buttons used cursor: pointer, and placeholders used gray-400
+  (#9ca3af). Restore both so the UI behaves as it did on v3.
+*/
+@layer base {
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #9ca3af;
+  }
+}
+
 @layer base {
   :root {
     --background: 222.2 84% 4.9%;

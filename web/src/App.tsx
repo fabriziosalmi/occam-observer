@@ -374,7 +374,7 @@ export default function App() {
             </span>
           )}
           {data.trace_id && (
-            <span className="sm:ml-auto text-[10px] font-mono opacity-60 truncate max-w-full">
+            <span className="sm:ml-auto text-[10px] leading-5 font-mono opacity-60 truncate max-w-full">
               trace_id={String(data.trace_id).slice(0, 16)}
             </span>
           )}
@@ -605,12 +605,12 @@ export default function App() {
               {violations.slice(0, 10).map((v, i) => (
                 <li key={i} className="py-2 flex flex-col md:flex-row md:items-center md:gap-4 text-xs font-mono">
                   <span className={cn(
-                    "px-2 py-0.5 rounded uppercase tracking-wide text-[10px] w-fit",
+                    "px-2 py-0.5 rounded uppercase tracking-wide text-[10px] leading-4 w-fit",
                     v.kind === "security" ? "bg-rose-500/15 text-rose-300" : "bg-amber-500/15 text-amber-300"
                   )}>{v.kind}</span>
                   <span className="text-primary truncate">{v.file}:{v.line}</span>
                   <span className="text-muted-foreground truncate flex-1">{v.text}</span>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-[10px] leading-4 text-muted-foreground">
                     {v.blame?.commit === "uncommitted"
                       ? <span className="text-rose-300">new</span>
                       : `${(v.blame?.commit ?? "").slice(0, 7)} · ${(v.blame?.author ?? "").split("<")[0]}`}
