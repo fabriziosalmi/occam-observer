@@ -3,7 +3,8 @@
 # Occam Observer — multi-stage container
 #
 #   docker build -t occam-observer .
-#   docker run --rm -v "$PWD:/repo" -p 9999:9999 occam-observer /repo
+#   docker run --rm -p 9999:9999 -v "$PWD:/repo" occam-observer
+#   curl "http://127.0.0.1:9999/analyze?path=/repo"
 #
 # The container runs the TUI-less API mode: starts the Go gateway and, in
 # parallel, keeps the engine warm against /repo. Agents consume /analyze,
@@ -20,8 +21,14 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/occam-api .
 
 # ── Stage 2: runtime (Alpine — bash + git + sqlite + jq) ─────────────────────
 FROM alpine:3.19
+# safe.directory '*': the container exists to read repos mounted from the host,
+# which belong to a host uid and never to the unprivileged `occam` user. Without
+# it git refuses every mount ("detected dubious ownership") and /analyze fails.
+# The check guards against repos planted by other users on a shared machine;
+# here the only repos are the ones the operator chooses to mount.
 RUN apk add --no-cache bash git jq sqlite coreutils ca-certificates \
-    && addgroup -S occam && adduser -S -G occam occam
+    && addgroup -S occam && adduser -S -G occam occam \
+    && git config --system --add safe.directory '*'
 
 WORKDIR /opt/occam
 COPY --from=gobuild /out/occam-api            /usr/local/bin/occam-api
@@ -32,9 +39,16 @@ RUN chmod +x /opt/occam/telemetry_observer.sh
 
 # Data dir for the SQLite TSDB. Mount a volume here to keep history across
 # container restarts: -v occam-data:/var/lib/occam
+#
+# API_HOST=0.0.0.0: inside the container 127.0.0.1 is the container's own
+# loopback, which a published port never reaches. Binding all interfaces here
+# exposes the API only on the container network; what reaches the host is
+# decided by -p (use -p 127.0.0.1:9999:9999 to keep it host-local). The
+# binary's own default outside the image stays 127.0.0.1.
 ENV OCCAM_DATA_DIR=/var/lib/occam \
     OCCAM_DB=/var/lib/occam/snapshots.db \
     ENGINE_SCRIPT=/opt/occam/telemetry_observer.sh \
+    API_HOST=0.0.0.0 \
     API_PORT=9999
 RUN mkdir -p /var/lib/occam && chown -R occam:occam /var/lib/occam /opt/occam
 

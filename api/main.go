@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -114,12 +115,24 @@ func observeTrend(ok bool) {
 
 const analyzeTimeout = 30 * time.Second
 
-func main() {
+// listenAddr returns the gateway bind address. API_HOST defaults to the
+// loopback so a bare-metal run is never exposed to the network; the container
+// image sets API_HOST=0.0.0.0 because inside a container the loopback is the
+// container's own, and a published port (-p 9999:9999) can only reach a
+// server bound to the container's external interface.
+func listenAddr() string {
+	host := os.Getenv("API_HOST")
+	if host == "" {
+		host = "127.0.0.1"
+	}
 	port := os.Getenv("API_PORT")
 	if port == "" {
 		port = "9999"
 	}
+	return net.JoinHostPort(host, port)
+}
 
+func main() {
 	http.HandleFunc("/",        withTraceID(handleRoot))
 	http.HandleFunc("/analyze", withTraceID(handleAnalyze))
 	http.HandleFunc("/trend",   withTraceID(handleTrend))
@@ -143,7 +156,7 @@ func main() {
 	fs := http.FileServer(http.Dir("./public"))
 	http.Handle("/ui/", http.StripPrefix("/ui/", fs))
 
-	addr := fmt.Sprintf("127.0.0.1:%s", port)
+	addr := listenAddr()
 	log.Printf("Occam API Server running on http://%s", addr)
 
 	// Background metrics refresh (snapshot count). Cancelled on shutdown

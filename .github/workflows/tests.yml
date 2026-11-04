@@ -31,10 +31,11 @@ jobs:
       - name: "Smoke: shipped config validates"
         run: ./telemetry_observer.sh --validate
 
-      - name: go vet + build (api)
+      - name: go vet + test + build (api)
         working-directory: api
         run: |
           go vet ./...
+          go test ./...
           go build -o /tmp/occam-api .
 
       - name: go vet + build (mcp)
@@ -52,6 +53,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build -t occam-observer:ci .
+      - name: "Smoke: published port + mounted repo owned by another uid"
+        run: scripts/docker-smoke.sh occam-observer:ci
 
   web:
     runs-on: ubuntu-latest

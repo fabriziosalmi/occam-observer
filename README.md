@@ -173,9 +173,9 @@ See [`config/schema.json`](config/schema.json) for the full field contract.
 ## REST API
 
 All endpoints live at `http://127.0.0.1:9999`. Override the port via
-`API_PORT`. Every `/analyze`, `/trend`, `/` request accepts and echoes
-`X-Trace-Id` (generated if absent) and forwards it to the engine so
-stderr logs correlate cleanly.
+`API_PORT` and the bind host via `API_HOST`. Every `/analyze`, `/trend`,
+`/` request accepts and echoes `X-Trace-Id` (generated if absent) and
+forwards it to the engine so stderr logs correlate cleanly.
 
 **Telemetry + observability**
 
@@ -381,6 +381,13 @@ curl "http://127.0.0.1:9999/analyze?path=/repo"
 The image is API-only (no TUI, no watcher) — agents drive it via HTTP.
 Mount a volume at `/var/lib/occam` to keep the TSDB across container restarts.
 
+Inside the image the API binds `0.0.0.0` (`API_HOST`), so the published port
+decides who can reach it: `-p 127.0.0.1:9999:9999` keeps it host-local. The
+image also trusts every mounted repo for git (`safe.directory '*'`), since a
+host directory is never owned by the container's `occam` user and git would
+otherwise refuse it. `scripts/docker-smoke.sh` runs exactly this shape and CI
+runs it on every push and PR.
+
 ## Tests
 
 ```bash
@@ -388,10 +395,10 @@ Mount a volume at `/var/lib/occam` to keep the TSDB across container restarts.
 ```
 
 Runs every `tests/*.sh` suite (JSON escaping, analyzers, check-CLI,
-coordination, MCP, self-observability, TSDB trend, CLI wrapper — 107
-assertions across the eight files), plus `go vet` on `api/` and `mcp/`,
-`bash -n` on the engine, and `--validate` on the shipped
-`config/main.yml`. The test runner exits non-zero on any failure; CI
+coordination, MCP, self-observability, TSDB trend, CLI wrapper, git
+errors: 114 assertions across the nine files), plus `go vet` and `go test` on
+`api/` and `mcp/`, `bash -n` on the engine, and `--validate` on the
+shipped `config/main.yml`. The test runner exits non-zero on any failure; CI
 runs the same on every push and PR.
 
 ## Documentation
@@ -415,6 +422,7 @@ cd docs && npm ci && npm run docs:dev
 | Variable                | Default                                   | Used by                                       |
 |-------------------------|-------------------------------------------|-----------------------------------------------|
 | `OCCAM_PORT`            | `9999`                                    | `./occam` CLI — gateway listen port           |
+| `API_HOST`              | `127.0.0.1` (`0.0.0.0` in the Docker image) | raw `api/main.go` binary: gateway bind host   |
 | `API_PORT`              | `9999`                                    | raw `api/main.go` binary — gateway listen port|
 | `OCCAM_API_URL`         | `http://127.0.0.1:9999`                   | MCP server — coordination-tool HTTP target    |
 | `CACHE_FILE`            | `/tmp/occam_state.json`                   | write-through JSON cache path                 |

@@ -150,7 +150,10 @@ curl "http://127.0.0.1:9999/analyze?path=/repo"
 ```
 
 API-only — agents drive it via HTTP; mount `/var/lib/occam` to keep the TSDB
-across restarts.
+across restarts. Inside the image the API binds `0.0.0.0`, so the published
+port decides who reaches it (`-p 127.0.0.1:9999:9999` keeps it host-local),
+and git trusts every mounted repo (`safe.directory '*'`), since a host
+directory is never owned by the container's `occam` user.
 
 ## Next steps
 

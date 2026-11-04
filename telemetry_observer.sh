@@ -338,7 +338,14 @@ validate_target() {
     [ -n "$TARGET_PATH" ]          || die "No target path. Set target_path in config/main.yml or via CLI."
     [ -d "$TARGET_PATH" ]          || die "Path does not exist: '${TARGET_PATH}'"
     [ -d "${TARGET_PATH}/.git" ]   || die "Not a Git repository: '${TARGET_PATH}'"
-    git -C "$TARGET_PATH" rev-parse HEAD &>/dev/null || die "Repo has no commits. Create at least an initial commit."
+    # Ask git whether it will read the repo at all before asking for HEAD:
+    # a refusal (dubious ownership, unreadable .git, ...) must surface git's
+    # own message, not be misreported as an empty repo.
+    local git_err
+    git_err="$(git -C "$TARGET_PATH" rev-parse --git-dir 2>&1 >/dev/null)" \
+        || die "git cannot read '${TARGET_PATH}':\n${git_err}"
+    git -C "$TARGET_PATH" rev-parse --verify --quiet HEAD >/dev/null \
+        || die "Repo has no commits. Create at least an initial commit."
 }
 
 # ── TUI: ALTERNATE SCREEN BUFFER ─────────────────────────────────────────────
