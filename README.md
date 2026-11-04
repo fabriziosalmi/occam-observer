@@ -1,6 +1,6 @@
 # Occam Observer
 
-**v0.2.1** · [Changelog](#changelog)
+**v0.3.0** · [Changelog](#changelog)
 
 > *Out-of-band, agent-friendly Git telemetry.*
 
@@ -451,6 +451,34 @@ cd docs && npm ci && npm run docs:dev
 | 3    | Bad CLI arguments / invalid config                             |
 
 ## Changelog
+
+### v0.3.0 - 2026-11-04
+
+The documented Docker usage works, the API gains a stable repo snapshot, and the
+dashboard and docs move to current toolchains.
+
+Added
+- `GET /repo/fingerprint`: a time-invariant snapshot of the repo (commit, languages,
+  stack, declared dependencies and frameworks, entrypoints, manifest files) for
+  agents that need ground truth.
+
+Fixed
+- Docker: the API was unreachable through the published port because it always
+  bound 127.0.0.1. The bind host is now `API_HOST` (default 127.0.0.1; the image
+  sets 0.0.0.0, so `-p` still decides who reaches it) (#20).
+- Docker: a repo mounted from the host (another uid) was refused by git as
+  "dubious ownership" and reported as "Repo has no commits". The image trusts
+  mounted repos, and a repo git refuses is reported with git's own error (#20).
+- API startup waits for the port to be ready, removing a start race (#5).
+- The jq transformation guards against an empty file list (#6).
+- The tests workflow parses and runs again (#18).
+
+Changed
+- Web dashboard on Tailwind CSS 4, rendering as on Tailwind 3 (#16); CI installs,
+  lints and builds it on every push and PR (#19).
+- Docs site on vite 6.4.5 instead of the vulnerable 5.4.21 (#17), with a sitemap
+  (#8), a meta-CSP and the shared privacy notice (#3, #4).
+- MIT LICENSE added; slopless pinned to v1.17.0.
 
 ### v0.2.1 — 2026-04-23
 
