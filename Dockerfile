@@ -3,7 +3,8 @@
 # Occam Observer — multi-stage container
 #
 #   docker build -t occam-observer .
-#   docker run --rm -v "$PWD:/repo" -p 9999:9999 occam-observer /repo
+#   docker run --rm -p 9999:9999 -v "$PWD:/repo" occam-observer
+#   curl "http://127.0.0.1:9999/analyze?path=/repo"
 #
 # The container runs the TUI-less API mode: starts the Go gateway and, in
 # parallel, keeps the engine warm against /repo. Agents consume /analyze,
@@ -32,9 +33,16 @@ RUN chmod +x /opt/occam/telemetry_observer.sh
 
 # Data dir for the SQLite TSDB. Mount a volume here to keep history across
 # container restarts: -v occam-data:/var/lib/occam
+#
+# API_HOST=0.0.0.0: inside the container 127.0.0.1 is the container's own
+# loopback, which a published port never reaches. Binding all interfaces here
+# exposes the API only on the container network; what reaches the host is
+# decided by -p (use -p 127.0.0.1:9999:9999 to keep it host-local). The
+# binary's own default outside the image stays 127.0.0.1.
 ENV OCCAM_DATA_DIR=/var/lib/occam \
     OCCAM_DB=/var/lib/occam/snapshots.db \
     ENGINE_SCRIPT=/opt/occam/telemetry_observer.sh \
+    API_HOST=0.0.0.0 \
     API_PORT=9999
 RUN mkdir -p /var/lib/occam && chown -R occam:occam /var/lib/occam /opt/occam
 

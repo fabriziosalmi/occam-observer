@@ -2,7 +2,10 @@
 
 Occam Observer exposes a single HTTP gateway (Go) that agents can drive
 without ever touching the bash engine directly. Default bind:
-`127.0.0.1:9999`. Override via `API_PORT`.
+`127.0.0.1:9999`. Override the port via `API_PORT` and the host via
+`API_HOST`. The Docker image sets `API_HOST=0.0.0.0` so a published port
+(`-p 9999:9999`) reaches the server; outside the image the default stays
+loopback-only.
 
 Every `/`, `/analyze`, `/trend` request accepts an `X-Trace-Id` request
 header — if you don't send one, the server generates a 16-hex-char id. The

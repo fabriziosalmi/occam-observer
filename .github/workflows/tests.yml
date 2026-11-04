@@ -31,10 +31,11 @@ jobs:
       - name: "Smoke: shipped config validates"
         run: ./telemetry_observer.sh --validate
 
-      - name: go vet + build (api)
+      - name: go vet + test + build (api)
         working-directory: api
         run: |
           go vet ./...
+          go test ./...
           go build -o /tmp/occam-api .
 
       - name: go vet + build (mcp)

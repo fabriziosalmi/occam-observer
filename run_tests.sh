@@ -44,13 +44,13 @@ done
 if command -v go >/dev/null 2>&1; then
     for mod in api mcp; do
         [ -f "$mod/go.mod" ] || continue
-        printf '\n──── go vet + build (%s/) ────\n' "$mod"
-        if (cd "$mod" && go vet ./... && go build -o "/tmp/occam_${mod}_test" .); then
-            printf '  ✓ go vet + build (%s)\n' "$mod"
+        printf '\n──── go vet + test + build (%s/) ────\n' "$mod"
+        if (cd "$mod" && go vet ./... && go test ./... && go build -o "/tmp/occam_${mod}_test" .); then
+            printf '  ✓ go vet + test + build (%s)\n' "$mod"
             PASS=$((PASS+1))
             rm -f "/tmp/occam_${mod}_test"
         else
-            printf '  ✗ go vet or build (%s)\n' "$mod"
+            printf '  ✗ go vet, test or build (%s)\n' "$mod"
             FAIL=$((FAIL+1))
             FAILED_NAMES+=("go-build-$mod")
         fi
