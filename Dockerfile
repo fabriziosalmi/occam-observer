@@ -21,8 +21,14 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/occam-api .
 
 # ── Stage 2: runtime (Alpine — bash + git + sqlite + jq) ─────────────────────
 FROM alpine:3.19
+# safe.directory '*': the container exists to read repos mounted from the host,
+# which belong to a host uid and never to the unprivileged `occam` user. Without
+# it git refuses every mount ("detected dubious ownership") and /analyze fails.
+# The check guards against repos planted by other users on a shared machine;
+# here the only repos are the ones the operator chooses to mount.
 RUN apk add --no-cache bash git jq sqlite coreutils ca-certificates \
-    && addgroup -S occam && adduser -S -G occam occam
+    && addgroup -S occam && adduser -S -G occam occam \
+    && git config --system --add safe.directory '*'
 
 WORKDIR /opt/occam
 COPY --from=gobuild /out/occam-api            /usr/local/bin/occam-api

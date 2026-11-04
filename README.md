@@ -381,6 +381,13 @@ curl "http://127.0.0.1:9999/analyze?path=/repo"
 The image is API-only (no TUI, no watcher) — agents drive it via HTTP.
 Mount a volume at `/var/lib/occam` to keep the TSDB across container restarts.
 
+Inside the image the API binds `0.0.0.0` (`API_HOST`), so the published port
+decides who can reach it: `-p 127.0.0.1:9999:9999` keeps it host-local. The
+image also trusts every mounted repo for git (`safe.directory '*'`), since a
+host directory is never owned by the container's `occam` user and git would
+otherwise refuse it. `scripts/docker-smoke.sh` runs exactly this shape and CI
+runs it on every push and PR.
+
 ## Tests
 
 ```bash
@@ -388,8 +395,8 @@ Mount a volume at `/var/lib/occam` to keep the TSDB across container restarts.
 ```
 
 Runs every `tests/*.sh` suite (JSON escaping, analyzers, check-CLI,
-coordination, MCP, self-observability, TSDB trend, CLI wrapper — 107
-assertions across the eight files), plus `go vet` and `go test` on
+coordination, MCP, self-observability, TSDB trend, CLI wrapper, git
+errors: 114 assertions across the nine files), plus `go vet` and `go test` on
 `api/` and `mcp/`, `bash -n` on the engine, and `--validate` on the
 shipped `config/main.yml`. The test runner exits non-zero on any failure; CI
 runs the same on every push and PR.
